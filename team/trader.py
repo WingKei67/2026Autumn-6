@@ -29,7 +29,17 @@ class MyTrader(Trader):
         #
         # Return a Signal(symbol=..., side="buy"/"sell", quantity=..., price=...)
         # to trade, or None to sit out this tick.
-        return None
+        if getattr(self, "_done", False):
+            return None
+        ask = market.best_ask("AAPL")
+        if ask is None or not portfolio.can_buy("AAPL", 1, ask):
+            return None
+        self._done = True
+        return Signal(symbol="AAPL", side="buy", quantity=1, price=ask)
+
+    def on_fill(self, side, symbol, quantity, price):
+        print(f"FILL {side} {quantity} {symbol} @ {price:.2f}")
+
 
     # Optional extra hooks:
     #   def on_fill(self, side, symbol, quantity, price): ...
