@@ -10,33 +10,38 @@ Run one seat:
 
 from __future__ import annotations
 
+import logging
+
 from arena import Signal, Trader
+
+logger = logging.getLogger(__name__)
+
+ORDER_QTY = 1  # Level 1: one tiny order is enough
 
 
 class MyTrader(Trader):
-    """Your alpha lives here."""
+    """Level 1: place a single small buy, then sit out."""
+
+    def __init__(self) -> None:
+        self._order_sent = False
 
     def on_tick(self, market, portfolio):
-        # TODO: implement your strategy.
-        #
-        # You can read:
-        #   market.symbols()           tradeable symbols
-        #   market.mid_price(sym)      current mid price
-        #   market.prices(sym)         recent mids, oldest first
-        #   market.best_bid/best_ask   the touch
-        #   portfolio.cash             your cash
-        #   portfolio.positions        symbol → shares held
-        #
-        # Return a Signal(symbol=..., side="buy"/"sell", quantity=..., price=...)
-        # to trade, or None to sit out this tick.
+        if self._order_sent:
+            return None
+
+        for sym in sorted(market.symbols()):
+            ask = market.best_ask(sym)
+            if ask is None:  # empty book, nothing to buy from
+                continue
+            if not portfolio.can_buy(sym, ORDER_QTY, ask):
+                continue
+            self._order_sent = True
+            return Signal(symbol=sym, side="buy", quantity=ORDER_QTY, price=ask)
+
         return None
 
-    # Optional extra hooks:
-    #   def on_fill(self, side, symbol, quantity, price): ...
-    #   def on_event(self, event, message, data): ...   # shocks, calendar
-    #   def on_ipo(self, symbol, lo, hi, shares, data): ...
-    #       # An IPO book opened — return qty (bids top of range) or
-    #       # (qty, max_price) as your indication, None to pass.
+    def on_fill(self, side, symbol, quantity, price):
+        logger.info("FILL: %s %d %s @ %.2f", side, quantity, symbol, price)
 
 
 if __name__ == "__main__":
