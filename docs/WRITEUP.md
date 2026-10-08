@@ -11,8 +11,22 @@ made exactly one trade: a buy of 1 AAPL at 220.10 (fee 0.22). It then sat out.
 
 ## Log excerpt: connect and first order
 
-TODO: paste the live-arena log (handshake + accepted order).
+Run: `TEAM_ID=6_rings_trader_1 python -m team.trader` against the class arena.
+
+```
+14:14:04  INFO      Connected to wss://feed.algoarena-st.duckdns.org as 6_rings_trader_1 (trader)
+14:14:04  INFO      Session event: FEE_SCHEDULE — Venue fee schedule: taker 30.0 bps, maker rebate 5.0 bps
+14:14:04  INFO      Session event: SESSION_OPEN — Session already open — you joined mid-session.
+14:14:05  INFO      Fill: bought 1 AAPL @ 208.7000 (fee=0.3130)
+```
+
+The handshake succeeded, and our single limit buy of 1 AAPL at the best ask was
+accepted and filled. No further orders were sent.
 
 ## Log excerpt: `on_fill`
 
-TODO: paste the `FILL: ...` line from the live run.
+Our `on_fill` override logs each execution of our own orders:
+
+```
+14:14:05  INFO      FILL: buy 1 AAPL @ 208.70
+```
