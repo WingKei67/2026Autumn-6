@@ -1,0 +1,89 @@
+classDiagram
+    direction TB
+
+    class Trader {
+        <<abstract>>
+        +on_tick(market, portfolio) Signal*
+        +on_fill(side, symbol, quantity, price)
+        +on_event(event, message, data)
+        +on_ipo(symbol, lo, hi, shares, data)
+        +run()
+    }
+
+    class MyTrader {
+        +on_tick(market, portfolio) Signal
+        +on_fill(side, symbol, quantity, price)
+    }
+
+    class Broker {
+        +spread(symbol, price, history)
+        +skew(symbol, inventory)
+        +toxic(trader_id)
+        +on_fill(side, symbol, quantity, price)
+        +run()
+    }
+
+    class Exchange {
+        +taker_bps
+        +rebate_bps
+        +accept_order(order, portfolio)
+        +on_trade(symbol, price, quantity, buyer_id, seller_id)
+        +run()
+    }
+
+    class MarketData {
+        +symbols()
+        +mid_price(s)
+        +best_bid(s)
+        +best_ask(s)
+        +spread(s)
+        +prices(s)
+    }
+
+    class Portfolio {
+        +cash
+        +positions
+        +can_buy(s, qty, px)
+        +can_sell(s, qty)
+    }
+
+    class Signal {
+        +symbol
+        +side
+        +quantity
+        +price
+        +confidence
+    }
+
+    class TraderBot {
+        +market
+        +portfolio
+        +strategy
+    }
+
+    class _AdaptedTraderBot {
+        -_owner
+    }
+
+    class Strategy {
+        +generate_signal(...)
+    }
+
+    class _AdapterStrategy {
+        -_owner
+        +generate_signal(market, portfolio)
+    }
+
+    Trader <|-- MyTrader : extends
+    Trader ..> MarketData : on_tick param
+    Trader ..> Portfolio : on_tick param
+    Trader ..> Signal : on_tick returns
+
+    TraderBot <|-- _AdaptedTraderBot
+    TraderBot *-- MarketData
+    TraderBot *-- Portfolio
+    TraderBot *-- Strategy
+    Strategy <|-- _AdapterStrategy
+    _AdaptedTraderBot o-- Trader : _owner
+    _AdapterStrategy o-- Trader : _owner
+    Trader ..> _AdaptedTraderBot : run() creates
