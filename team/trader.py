@@ -38,6 +38,13 @@ class MyTrader(Trader):
     def on_fill(self, side, symbol, quantity, price):
         logger.info("FILL: %s %d %s @ %.2f", side, quantity, symbol, price)
 
+    def on_event(self, event, message, data):
+        # The arena switches week/rule set while we stay connected (e.g. open
+        # play -> the graded block); re-arm so we place one order per scenario.
+        if event == "WEEK_CHANGED":
+            logger.info("%s — re-arming one order", message)
+            self._done = False
+
 
 if __name__ == "__main__":
     MyTrader().run()
