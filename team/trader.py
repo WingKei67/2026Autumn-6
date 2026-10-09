@@ -16,29 +16,24 @@ from arena import Signal, Trader
 
 logger = logging.getLogger(__name__)
 
+SYMBOL = "AAPL"
 ORDER_QTY = 1  # Level 1: one tiny order is enough
 
 
 class MyTrader(Trader):
-    """Level 1: place a single small buy, then sit out."""
+    """Level 1: place a single small buy of AAPL, then sit out."""
 
     def __init__(self) -> None:
-        self._order_sent = False
+        self._done = False
 
     def on_tick(self, market, portfolio):
-        if self._order_sent:
+        if self._done:
             return None
-
-        for sym in sorted(market.symbols()):
-            ask = market.best_ask(sym)
-            if ask is None:  # empty book, nothing to buy from
-                continue
-            if not portfolio.can_buy(sym, ORDER_QTY, ask):
-                continue
-            self._order_sent = True
-            return Signal(symbol=sym, side="buy", quantity=ORDER_QTY, price=ask)
-
-        return None
+        ask = market.best_ask(SYMBOL)
+        if ask is None or not portfolio.can_buy(SYMBOL, ORDER_QTY, ask):
+            return None
+        self._done = True
+        return Signal(symbol=SYMBOL, side="buy", quantity=ORDER_QTY, price=ask)
 
     def on_fill(self, side, symbol, quantity, price):
         logger.info("FILL: %s %d %s @ %.2f", side, quantity, symbol, price)

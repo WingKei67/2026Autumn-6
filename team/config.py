@@ -29,7 +29,15 @@ ARENA_TOKEN = os.environ.get("ARENA_TOKEN", "")
 
 TEAM_NAME  = '6 Rings'
 BROKER_IDS = ['6_rings_broker']
-TRADER_IDS = ['6_rings_trader_1', '6_rings_trader_2']
+TRADER_IDS = ['6_rings_trader_1', '6_rings_trader_2',
+              '6_rings_trader_3', '6_rings_trader_4']
 
-# Capital you allocated per bot (informational — the exchange enforces it):
-CAPITAL = {'6_rings_broker': 350000, '6_rings_trader_1': 175000, '6_rings_trader_2': 175000}
+# Capital you allocated per bot (informational — the exchange enforces it).
+# Revised 2026-10-08 with the instructor: no exchange license.
+CAPITAL = {
+    '6_rings_broker': 400000,
+    '6_rings_trader_1': 150000,
+    '6_rings_trader_2': 150000,
+    '6_rings_trader_3': 150000,
+    '6_rings_trader_4': 150000,
+}
