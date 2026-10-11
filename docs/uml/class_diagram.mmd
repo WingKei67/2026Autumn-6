@@ -9,12 +9,11 @@ classDiagram
         +on_ipo(symbol, lo, hi, shares, data)
         +run()
     }
-
     class MyTrader {
         +on_tick(market, portfolio) Signal
         +on_fill(side, symbol, quantity, price)
+        +on_event(event, message, data)
     }
-
     class Broker {
         +spread(symbol, price, history)
         +skew(symbol, inventory)
@@ -22,7 +21,10 @@ classDiagram
         +on_fill(side, symbol, quantity, price)
         +run()
     }
-
+    class MyBroker {
+        +spread(symbol, price, history)
+        +skew(symbol, inventory)
+    }
     class Exchange {
         +taker_bps
         +rebate_bps
@@ -36,54 +38,87 @@ classDiagram
         +mid_price(s)
         +best_bid(s)
         +best_ask(s)
-        +spread(s)
         +prices(s)
     }
-
     class Portfolio {
         +cash
         +positions
         +can_buy(s, qty, px)
         +can_sell(s, qty)
     }
-
     class Signal {
         +symbol
         +side
         +quantity
         +price
-        +confidence
     }
 
     class TraderBot {
+        <<engine>>
         +market
         +portfolio
-        +strategy
+    }
+    class ExchangeServer {
+        <<hosted arena>>
     }
 
-    class _AdaptedTraderBot {
-        -_owner
+    class Handshake {
+        <<message>>
+        +direction: client to exchange
+        +team_id
+        +role
+        +token
     }
-
-    class Strategy {
-        +generate_signal(...)
+    class PlaceOrder {
+        <<message>>
+        +direction: client to exchange
+        +symbol
+        +side
+        +order_type
+        +price
+        +quantity
     }
-
-    class _AdapterStrategy {
-        -_owner
-        +generate_signal(market, portfolio)
+    class CancelOrder {
+        <<message>>
+        +direction: client to exchange
+        +order_id
+        +symbol
+    }
+    class OrderAck {
+        <<message>>
+        +direction: exchange to client
+        +order_id
+        +symbol
+        +side
+        +price
+        +quantity
+    }
+    class BookSnapshot {
+        <<message>>
+        +direction: exchange to client
+        +symbol
+        +bids
+        +asks
+        +mid_price
     }
 
     Trader <|-- MyTrader : extends
-    Trader ..> MarketData : on_tick param
-    Trader ..> Portfolio : on_tick param
+    Broker <|-- MyBroker : extends
+
+    Trader ..> MarketData : on_tick arg
+    Trader ..> Portfolio : on_tick arg
     Trader ..> Signal : on_tick returns
 
-    TraderBot <|-- _AdaptedTraderBot
+    TraderBot o-- Trader : calls hooks
     TraderBot *-- MarketData
     TraderBot *-- Portfolio
-    TraderBot *-- Strategy
-    Strategy <|-- _AdapterStrategy
-    _AdaptedTraderBot o-- Trader : _owner
-    _AdapterStrategy o-- Trader : _owner
-    Trader ..> _AdaptedTraderBot : run() creates
+    Exchange ..> ExchangeServer : adapts
+
+    TraderBot ..> Handshake : sends
+    TraderBot ..> PlaceOrder : sends
+    TraderBot ..> CancelOrder : sends
+    ExchangeServer ..> OrderAck : sends
+    ExchangeServer ..> BookSnapshot : sends
+
+    note for MyTrader "overrides on_tick, on_fill, on_event / inherits on_ipo, run"
+    note for MyBroker "overrides spread, skew / inherits toxic, on_fill, run"
