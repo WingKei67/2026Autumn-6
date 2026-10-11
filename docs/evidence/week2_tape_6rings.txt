@@ -1,0 +1,35 @@
+# Week 2 graded block — evidence for team 6 Rings
+# Source: venue recording session_week02_20261009_204000.jsonl (times: Chicago, CDT, 2026-10-09)
+# Other teams' ids are replaced by <other team>.
+
+15:40:00.008  6_rings_trader_4  connected
+15:40:00.008  6_rings_trader_3  connected
+15:40:00.008  6_rings_trader_1  connected
+15:40:00.053  CALENDAR        No scheduled events this session
+15:40:00.093  SESSION_OPEN    Trading session is now OPEN. Bots activate!
+15:40:01.008  order_ack        6_rings_trader_1 buy 1 AAPL @ 196.92  order_id=f6c681d0
+15:40:01.009  trade_execution  AAPL 1 @ 196.92  buyer=6_rings_trader_1 seller=<other team> fee=0.5908
+15:40:01.128  order_ack        6_rings_trader_4 buy 1 AAPL @ 196.92  order_id=dce708b6
+15:40:01.131  trade_execution  AAPL 1 @ 196.92  buyer=6_rings_trader_4 seller=<other team> fee=0.5908
+15:42:21.922  order_ack        6_rings_trader_1 sell 1 AAPL @ 194.83  order_id=309df77c
+15:42:21.923  trade_execution  AAPL 1 @ 194.83  buyer=<other team> seller=6_rings_trader_1 fee=0.5845
+15:44:46.742  CALENDAR        Upcoming: earnings AAPL @ t400
+15:45:48.796  6_rings_trader_3  disconnected
+15:46:52.029  CALENDAR_EVENT  Earnings: AAPL moving +6.2%
+15:48:17.712  6_rings_trader_1  disconnected
+15:48:19.103  6_rings_trader_1  connected
+15:48:19.622  order_ack        6_rings_trader_1 buy 1 AAPL @ 210.93  order_id=e922876d
+15:48:19.624  trade_execution  AAPL 1 @ 210.93  buyer=6_rings_trader_1 seller=<other team> fee=0.6328
+15:48:52.970  6_rings_trader_3  connected
+15:48:59.483  order_ack        6_rings_trader_3 buy 1 INTC @ 20.68  order_id=340f8a8c
+15:49:00.192  trade_execution  INTC 1 @ 20.68  buyer=6_rings_trader_3 seller=<other team> fee=0.0620
+15:51:20.067  order_ack        6_rings_trader_1 sell 1 AAPL @ 209.6  order_id=5c446665
+15:51:20.069  trade_execution  AAPL 1 @ 209.6  buyer=<other team> seller=6_rings_trader_1 fee=0.6288
+15:53:27.872  CALENDAR        Upcoming: econ_print MARKET @ t900
+15:55:33.043  CALENDAR_EVENT  Econ Print: market-wide moving -2.0%
+16:19:38.205  6_rings_trader_4  disconnected
+16:23:50.610  6_rings_trader_4  connected
+16:30:01.578  SESSION_CLOSED  Trading session is now CLOSED. Flatten positions.
+16:30:02.546  order_reject     6_rings_trader_4 SESSION_CLOSED x10 (post-close flatten attempts)
+16:30:02.556  order_reject     6_rings_trader_3 SESSION_CLOSED x10 (post-close flatten attempts)
+16:30:02.567  order_reject     6_rings_trader_1 SESSION_CLOSED x10 (post-close flatten attempts)
