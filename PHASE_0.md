@@ -14,7 +14,7 @@
 | $1M allocation and justification | `ALLOCATION.md` |
 | UML class diagram | `docs/uml/class_diagram.png` (`docs/uml/README.md` maps each box to its file) |
 | Connected, `order_ack` received, fills | section 2 below; full excerpt in `docs/evidence/week2_tape_6rings.txt` |
-| Code | `team/trader.py`, `team/broker.py` |
+| Code | `team/trader.py` |
 
 All four members confirmed that `make test` passes on their local clone.
 
