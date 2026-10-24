@@ -1,0 +1,26 @@
+Block t1405547 → t1408180 (2633 ticks)
+NOTE: no aux records — this is a market-only recording. Uptime, orders and
+      rejects are unknown; reactions below are measured from our FILLS only.
+      Ask for the full recording (or use the dashboard REPLAY tab) for those.
+
+EVENT t1405847 (+300) CALENDAR_EVENT: Earnings: NVDA moving -3.8%
+EVENT t1406247 (+700) CALENDAR_EVENT: Earnings: TSLA moving -5.2%
+
+── 6_rings_trader_1
+   1 fills in this recording · first fill t_open+860
+   CALENDAR_EVENT t1405847 Earnings: NVDA moving -3.8%              → no fill within 60
+   CALENDAR_EVENT t1406247 Earnings: TSLA moving -5.2%              → no fill within 60
+── 6_rings_trader_2
+   98 fills in this recording · first fill t_open+300
+   CALENDAR_EVENT t1405847 Earnings: NVDA moving -3.8%              → filled in 0 ticks
+   CALENDAR_EVENT t1406247 Earnings: TSLA moving -5.2%              → filled in 0 ticks
+── 6_rings_trader_3
+   57 fills in this recording · first fill t_open+1
+   CALENDAR_EVENT t1405847 Earnings: NVDA moving -3.8%              → no fill within 60
+   CALENDAR_EVENT t1406247 Earnings: TSLA moving -5.2%              → filled in 0 ticks
+── 6_rings_trader_4
+   1 fills in this recording · first fill t_open+1
+   CALENDAR_EVENT t1405847 Earnings: NVDA moving -3.8%              → no fill within 60
+   CALENDAR_EVENT t1406247 Earnings: TSLA moving -5.2%              → no fill within 60
+
+(SESSION_CLOSED reports 179,451 trades venue-wide; this file is a sample — our 157 fills here are a lower bound.)

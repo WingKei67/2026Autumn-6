@@ -7,6 +7,8 @@ __pycache__/
 venv/
 .venv/
 sessions/
+logs/
+team/state/
 
 # Secrets — your team token. NEVER commit this.
 .env

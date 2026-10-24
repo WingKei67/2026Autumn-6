@@ -1,0 +1,939 @@
+15:16:06 INFO    Session log → /Users/sevenli/Desktop/UchicagoMSFM/FINM 33500 Systematic trading strategies/algoarena/2026Autumn-6/logs/6_rings_trader_2_20261024_151606.log
+15:16:06 INFO    Connecting to ws://localhost:8799 (EXCHANGE_URL from the shell)
+15:16:06 INFO    Connected to ws://localhost:8799 as 6_rings_trader_2 (trader)
+15:16:06 INFO    CONNECT #1 as 6_rings_trader_2
+15:16:06 INFO    RESYNC book from first snapshot (AAPL bid None ask None)
+15:16:06 INFO    TICK 4 · rank 3/3 · net_worth 100,000.00 · realized +0.00 · unrealized +0.00
+15:16:06 INFO    RESYNC from leaderboard — adopted 13 difference(s):
+    AAPL: ours 20 vs exchange 0
+    AMD: ours 20 vs exchange 0
+    AMZN: ours 20 vs exchange 0
+    GOOGL: ours 20 vs exchange 0
+    INTC: ours 20 vs exchange 0
+    META: ours 20 vs exchange 0
+    MSFT: ours 20 vs exchange 0
+    NFLX: ours 20 vs exchange 0
+    NVDA: ours 122 vs exchange 0
+    ORCA: ours 111 vs exchange 0
+    TSLA: ours 20 vs exchange 0
+    cash: ours 133,650.35 vs exchange 100,000.00
+    realized: ours -4,109.98 vs exchange +0.00
+15:16:06 INFO    BOOKS · net_worth 100,000.00 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    (flat)
+    cash 100,000.00 · realized +0.00 · unrealized +0.00 · fees 0.00 · interest/carry/dividends +0.00
+15:16:06 INFO    Session event: FEE_SCHEDULE — Venue fee schedule: taker 15.0 bps, maker rebate 10.0 bps
+15:16:08 INFO    TICK 5 · rank 3/3 · net_worth 100,000.00 · realized +0.00 · unrealized +0.00
+15:16:10 INFO    GRANT starting shares (no trade print): +20 AAPL, +20 AMD, +20 AMZN, +20 GOOGL, +20 INTC, +20 META, +20 MSFT, +20 NFLX, +20 NVDA, +20 TSLA
+15:16:10 INFO    Session event: SESSION_PREOPEN — Pre-open: limit orders only — the opening auction crosses in 12 ticks
+15:16:10 INFO    TICK 7 · rank 3/3 · net_worth 158,027.33 · realized +0.00 · unrealized +0.00
+15:16:10 INFO    Session event: AUCTION_INDICATIVE — Opening cross in 11 ticks
+15:16:11 INFO    Session event: AUCTION_INDICATIVE — Opening cross in 10 ticks
+15:16:12 INFO    TICK 9 · rank 3/3 · net_worth 158,017.44 · realized +0.00 · unrealized +11.97
+15:16:12 INFO    Session event: AUCTION_INDICATIVE — Opening cross in 9 ticks
+15:16:13 INFO    Session event: AUCTION_INDICATIVE — Opening cross in 8 ticks
+15:16:14 INFO    TICK 11 · rank 3/3 · net_worth 158,045.27 · realized +0.00 · unrealized +21.95
+15:16:14 INFO    Session event: AUCTION_INDICATIVE — Opening cross in 7 ticks
+15:16:15 INFO    Session event: AUCTION_INDICATIVE — Opening cross in 6 ticks
+15:16:16 INFO    TICK 13 · rank 3/3 · net_worth 158,071.47 · realized +0.00 · unrealized +34.52
+15:16:16 INFO    Session event: AUCTION_INDICATIVE — Opening cross in 5 ticks
+15:16:17 INFO    Session event: AUCTION_INDICATIVE — Opening cross in 4 ticks
+15:16:18 INFO    TICK 15 · rank 3/3 · net_worth 158,115.08 · realized +0.00 · unrealized +68.15
+15:16:18 INFO    Session event: AUCTION_INDICATIVE — Opening cross in 3 ticks
+15:16:19 INFO    Session event: AUCTION_INDICATIVE — Opening cross in 2 ticks
+15:16:20 INFO    TICK 17 · rank 3/3 · net_worth 158,127.71 · realized +0.00 · unrealized +84.73
+15:16:20 INFO    Session event: AUCTION_INDICATIVE — Opening cross in 1 ticks
+15:16:21 INFO    Session event: CALENDAR — 4 scheduled event(s) this session
+15:16:21 INFO    Session event: IPO_ANNOUNCE — IPO: Orca Analytics (ORCA) — 4,000 shares at $24.00–28.00; book opens t150, lists t550
+15:16:21 INFO    Session event: SESSION_OPEN — Trading session is now OPEN. Bots activate!
+15:16:21 INFO    Session event: AUCTION_RESULT — Opening auction complete — continuous trading begins
+15:16:22 INFO    TICK 19 · rank 3/3 · net_worth 158,126.68 · realized +0.00 · unrealized +97.18
+15:16:24 INFO    TICK 21 · rank 2/3 · net_worth 158,156.07 · realized +0.00 · unrealized +128.03
+15:16:26 INFO    TICK 23 · rank 2/3 · net_worth 158,173.99 · realized +0.00 · unrealized +149.46
+15:16:28 INFO    TICK 25 · rank 2/3 · net_worth 158,184.92 · realized +0.00 · unrealized +160.89
+15:16:30 INFO    TICK 27 · rank 2/3 · net_worth 158,205.58 · realized +0.00 · unrealized +178.01
+15:16:32 INFO    TICK 29 · rank 1/3 · net_worth 158,231.08 · realized +0.00 · unrealized +206.13
+15:16:34 INFO    TICK 31 · rank 1/3 · net_worth 158,299.40 · realized +0.00 · unrealized +225.31
+15:16:36 INFO    TICK 33 · rank 1/3 · net_worth 158,319.60 · realized +0.00 · unrealized +258.05
+15:16:36 INFO    BOOKS · net_worth 158,319.60 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     224.61      +96.80
+    AMD        +20     164.77     164.99       +4.45
+    AMZN       +20     194.75     195.63      +17.51
+    GOOGL      +20     174.96     177.93      +59.31
+    INTC       +20      21.99      22.24       +5.06
+    META       +20     579.91     580.07       +3.17
+    MSFT       +20     414.44     418.24      +75.93
+    NFLX       +20     720.95     718.52      -48.46
+    NVDA       +20     130.23     131.60      +27.42
+    TSLA       +20     279.61     280.45      +16.85
+    cash 100,003.00 · realized +0.00 · unrealized +258.04 · fees 0.00 · interest/carry/dividends +3.00
+15:16:38 INFO    TICK 35 · rank 1/3 · net_worth 158,335.60 · realized +0.00 · unrealized +299.28
+15:16:40 INFO    TICK 37 · rank 1/3 · net_worth 158,321.40 · realized +0.00 · unrealized +295.08
+15:16:42 INFO    TICK 39 · rank 1/3 · net_worth 158,301.80 · realized +0.00 · unrealized +253.39
+15:16:44 INFO    TICK 41 · rank 1/3 · net_worth 158,292.40 · realized +0.00 · unrealized +230.46
+15:16:46 INFO    TICK 43 · rank 1/3 · net_worth 158,235.20 · realized +0.00 · unrealized +205.26
+15:16:48 INFO    TICK 45 · rank 1/3 · net_worth 158,229.80 · realized +0.00 · unrealized +175.10
+15:16:50 INFO    TICK 47 · rank 1/3 · net_worth 158,192.20 · realized +0.00 · unrealized +153.08
+15:16:52 INFO    TICK 49 · rank 1/3 · net_worth 158,219.00 · realized +0.00 · unrealized +142.61
+15:16:54 INFO    TICK 51 · rank 1/3 · net_worth 158,234.80 · realized +0.00 · unrealized +160.36
+15:16:56 INFO    TICK 53 · rank 1/3 · net_worth 158,250.60 · realized +0.00 · unrealized +175.90
+15:16:58 INFO    TICK 55 · rank 1/3 · net_worth 158,269.40 · realized +0.00 · unrealized +192.69
+15:17:00 INFO    TICK 57 · rank 1/3 · net_worth 158,306.60 · realized +0.00 · unrealized +228.92
+15:17:02 INFO    TICK 59 · rank 1/3 · net_worth 158,299.60 · realized +0.00 · unrealized +251.54
+15:17:04 INFO    TICK 61 · rank 1/3 · net_worth 158,334.40 · realized +0.00 · unrealized +255.26
+15:17:06 INFO    TICK 63 · rank 1/3 · net_worth 158,356.60 · realized +0.00 · unrealized +276.94
+15:17:06 INFO    BOOKS · net_worth 158,356.60 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     224.95     +103.59
+    AMD        +20     164.77     174.18     +188.31
+    AMZN       +20     194.75     196.08      +26.65
+    GOOGL      +20     174.96     178.70      +74.85
+    INTC       +20      21.99      23.58      +31.93
+    META       +20     579.91     582.45      +50.74
+    MSFT       +20     414.44     419.09      +93.02
+    NFLX       +20     720.95     702.04     -378.07
+    NVDA       +20     130.23     132.66      +48.68
+    TSLA       +20     279.61     281.47      +37.24
+    cash 100,009.00 · realized +0.00 · unrealized +276.94 · fees 0.00 · interest/carry/dividends +9.00
+15:17:08 INFO    TICK 65 · rank 1/3 · net_worth 158,376.60 · realized +0.00 · unrealized +294.27
+15:17:10 INFO    TICK 67 · rank 1/3 · net_worth 158,395.20 · realized +0.00 · unrealized +311.91
+15:17:12 INFO    TICK 69 · rank 1/3 · net_worth 158,296.40 · realized +0.00 · unrealized +328.41
+15:17:14 INFO    TICK 71 · rank 1/3 · net_worth 158,330.40 · realized +0.00 · unrealized +275.42
+15:17:16 INFO    TICK 73 · rank 1/3 · net_worth 158,293.00 · realized +0.00 · unrealized +240.94
+15:17:18 INFO    TICK 75 · rank 1/3 · net_worth 158,269.20 · realized +0.00 · unrealized +215.95
+15:17:20 INFO    TICK 77 · rank 1/3 · net_worth 158,261.80 · realized +0.00 · unrealized +199.49
+15:17:22 INFO    TICK 79 · rank 1/3 · net_worth 158,267.60 · realized +0.00 · unrealized +198.40
+15:17:24 INFO    TICK 81 · rank 1/3 · net_worth 158,279.80 · realized +0.00 · unrealized +211.41
+15:17:26 INFO    TICK 83 · rank 1/3 · net_worth 158,289.20 · realized +0.00 · unrealized +220.26
+15:17:28 INFO    TICK 85 · rank 1/3 · net_worth 158,295.60 · realized +0.00 · unrealized +230.31
+15:17:30 INFO    TICK 87 · rank 1/3 · net_worth 158,300.20 · realized +0.00 · unrealized +234.24
+15:17:32 INFO    TICK 89 · rank 1/3 · net_worth 158,305.40 · realized +0.00 · unrealized +239.56
+15:17:34 INFO    TICK 91 · rank 1/3 · net_worth 158,307.00 · realized +0.00 · unrealized +241.16
+15:17:36 INFO    TICK 93 · rank 1/3 · net_worth 158,308.20 · realized +0.00 · unrealized +242.53
+15:17:36 INFO    BOOKS · net_worth 158,308.20 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.02     +104.92
+    AMD        +20     164.77     178.32     +271.01
+    AMZN       +20     194.75     196.05      +25.90
+    GOOGL      +20     174.96     178.62      +73.22
+    INTC       +20      21.99      24.54      +51.03
+    META       +20     579.91     582.70      +55.86
+    MSFT       +20     414.44     419.18      +94.91
+    NFLX       +20     720.95     694.29     -533.20
+    NVDA       +20     130.23     133.44      +64.32
+    TSLA       +20     279.61     281.34      +34.56
+    cash 100,015.00 · realized +0.00 · unrealized +242.52 · fees 0.00 · interest/carry/dividends +15.00
+15:17:38 INFO    TICK 95 · rank 1/3 · net_worth 158,316.40 · realized +0.00 · unrealized +243.56
+15:17:40 INFO    TICK 97 · rank 1/3 · net_worth 158,335.80 · realized +0.00 · unrealized +260.18
+15:17:42 INFO    TICK 99 · rank 1/3 · net_worth 158,341.00 · realized +0.00 · unrealized +267.79
+15:17:44 INFO    TICK 101 · rank 1/3 · net_worth 158,353.60 · realized +0.00 · unrealized +272.25
+15:17:46 INFO    TICK 103 · rank 1/3 · net_worth 158,359.20 · realized +0.00 · unrealized +281.96
+15:17:48 INFO    TICK 105 · rank 1/3 · net_worth 158,361.60 · realized +0.00 · unrealized +285.15
+15:17:50 INFO    TICK 107 · rank 1/3 · net_worth 158,364.00 · realized +0.00 · unrealized +288.27
+15:17:52 INFO    TICK 109 · rank 1/3 · net_worth 158,363.20 · realized +0.00 · unrealized +289.76
+15:17:54 INFO    TICK 111 · rank 1/3 · net_worth 158,363.60 · realized +0.00 · unrealized +290.78
+15:17:56 INFO    TICK 113 · rank 1/3 · net_worth 158,364.00 · realized +0.00 · unrealized +292.93
+15:17:58 INFO    TICK 115 · rank 1/3 · net_worth 158,368.00 · realized +0.00 · unrealized +293.72
+15:18:00 INFO    TICK 117 · rank 1/3 · net_worth 158,370.40 · realized +0.00 · unrealized +299.64
+15:18:02 INFO    TICK 119 · rank 1/3 · net_worth 158,372.60 · realized +0.00 · unrealized +299.29
+15:18:04 INFO    TICK 121 · rank 1/3 · net_worth 158,379.00 · realized +0.00 · unrealized +303.40
+15:18:06 INFO    BOOKS · net_worth 158,379.00 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.08     +106.22
+    AMD        +20     164.77     178.28     +270.17
+    AMZN       +20     194.75     196.35      +31.91
+    GOOGL      +20     174.96     180.54     +111.59
+    INTC       +20      21.99      24.62      +52.66
+    META       +20     579.91     583.15      +64.87
+    MSFT       +20     414.44     419.45     +100.16
+    NFLX       +20     720.95     694.32     -532.44
+    NVDA       +20     130.23     133.40      +63.43
+    TSLA       +20     279.61     281.31      +34.00
+    cash 100,020.60 · realized +0.00 · unrealized +302.57 · fees 0.00 · interest/carry/dividends +20.60
+15:18:06 INFO    TICK 123 · rank 1/3 · net_worth 158,382.00 · realized +0.00 · unrealized +302.57
+15:18:08 INFO    TICK 125 · rank 1/3 · net_worth 158,380.60 · realized +0.00 · unrealized +302.73
+15:18:10 INFO    TICK 127 · rank 1/3 · net_worth 158,381.00 · realized +0.00 · unrealized +304.38
+15:18:12 INFO    TICK 129 · rank 1/3 · net_worth 158,381.40 · realized +0.00 · unrealized +305.08
+15:18:14 INFO    TICK 131 · rank 1/3 · net_worth 158,382.00 · realized +0.00 · unrealized +304.50
+15:18:16 INFO    TICK 133 · rank 1/3 · net_worth 158,382.40 · realized +0.00 · unrealized +305.40
+15:18:18 INFO    TICK 135 · rank 1/3 · net_worth 158,382.80 · realized +0.00 · unrealized +307.03
+15:18:20 INFO    TICK 137 · rank 1/3 · net_worth 158,381.80 · realized +0.00 · unrealized +307.29
+15:18:22 INFO    TICK 139 · rank 1/3 · net_worth 158,385.60 · realized +0.00 · unrealized +304.22
+15:18:24 INFO    TICK 142 · rank 1/3 · net_worth 158,386.20 · realized +0.00 · unrealized +300.26
+15:18:26 INFO    TICK 144 · rank 1/3 · net_worth 158,386.60 · realized +0.00 · unrealized +300.36
+15:18:28 INFO    TICK 146 · rank 1/3 · net_worth 158,389.40 · realized +0.00 · unrealized +301.96
+15:18:30 INFO    TICK 148 · rank 1/3 · net_worth 158,388.00 · realized +0.00 · unrealized +297.40
+15:18:32 INFO    TICK 150 · rank 1/3 · net_worth 158,383.40 · realized +0.00 · unrealized +296.42
+15:18:34 INFO    TICK 152 · rank 1/3 · net_worth 158,385.00 · realized +0.00 · unrealized +296.01
+15:18:36 INFO    BOOKS · net_worth 158,385.00 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.13     +107.13
+    AMD        +20     164.77     178.25     +269.60
+    AMZN       +20     194.75     196.43      +33.51
+    GOOGL      +20     174.96     180.46     +109.96
+    INTC       +20      21.99      24.63      +52.80
+    META       +20     579.91     583.10      +63.83
+    MSFT       +20     414.44     419.38      +98.78
+    NFLX       +20     720.95     694.50     -528.92
+    NVDA       +20     130.23     133.30      +61.45
+    TSLA       +20     279.61     280.95      +26.89
+    cash 100,026.80 · realized +0.00 · unrealized +295.03 · fees 0.00 · interest/carry/dividends +26.80
+15:18:36 INFO    TICK 154 · rank 1/3 · net_worth 158,386.20 · realized +0.00 · unrealized +294.40
+15:18:38 INFO    TICK 156 · rank 1/3 · net_worth 158,386.60 · realized +0.00 · unrealized +295.43
+15:18:40 INFO    TICK 158 · rank 1/3 · net_worth 158,387.00 · realized +0.00 · unrealized +297.00
+15:18:42 INFO    TICK 160 · rank 1/3 · net_worth 158,387.40 · realized +0.00 · unrealized +299.08
+15:18:44 INFO    TICK 162 · rank 1/3 · net_worth 158,385.80 · realized +0.00 · unrealized +296.88
+15:18:46 INFO    TICK 164 · rank 1/3 · net_worth 158,386.20 · realized +0.00 · unrealized +297.42
+15:18:48 INFO    TICK 166 · rank 1/3 · net_worth 158,388.80 · realized +0.00 · unrealized +300.63
+15:18:50 INFO    TICK 168 · rank 1/3 · net_worth 158,389.80 · realized +0.00 · unrealized +303.00
+15:18:51 INFO    Session event: IPO_OPEN — ORCA book is OPEN — subscribe with quantity and max price ($24.00–28.00) before t450
+15:18:51 INFO    IPO ORCA: indicating 150 up to $28.00 (range $24.00–28.00, 4000 offered)
+15:18:51 INFO    Session event: IPO_SUB_RESULT — indication recorded: 150 ORCA up to $28.00
+15:18:52 INFO    TICK 170 · rank 1/3 · net_worth 158,389.80 · realized +0.00 · unrealized +302.13
+15:18:54 INFO    TICK 172 · rank 1/3 · net_worth 158,390.20 · realized +0.00 · unrealized +301.15
+15:18:56 INFO    TICK 174 · rank 1/3 · net_worth 158,390.60 · realized +0.00 · unrealized +300.27
+15:18:58 INFO    TICK 176 · rank 1/3 · net_worth 158,391.40 · realized +0.00 · unrealized +301.82
+15:19:00 INFO    TICK 178 · rank 1/3 · net_worth 158,393.41 · realized +0.00 · unrealized +302.09
+15:19:02 INFO    TICK 180 · rank 1/3 · net_worth 158,393.41 · realized +0.00 · unrealized +300.01
+15:19:04 INFO    TICK 182 · rank 1/3 · net_worth 158,396.81 · realized +0.00 · unrealized +301.41
+15:19:06 INFO    BOOKS · net_worth 158,396.81 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.21     +108.77
+    AMD        +20     164.77     178.10     +266.64
+    AMZN       +20     194.75     196.47      +34.42
+    GOOGL      +20     174.96     180.70     +114.79
+    INTC       +20      21.99      24.62      +52.74
+    META       +20     579.91     583.28      +67.48
+    MSFT       +20     414.44     419.39      +99.09
+    NFLX       +20     720.95     694.33     -532.31
+    NVDA       +20     130.23     133.23      +59.95
+    TSLA       +20     279.61     281.07      +29.30
+    cash 100,032.81 · realized +0.00 · unrealized +300.87 · fees 0.00 · interest/carry/dividends +32.81
+15:19:06 INFO    TICK 184 · rank 1/3 · net_worth 158,398.81 · realized +0.00 · unrealized +303.50
+15:19:08 INFO    TICK 186 · rank 1/3 · net_worth 158,401.21 · realized +0.00 · unrealized +305.28
+15:19:10 INFO    TICK 188 · rank 1/3 · net_worth 158,401.61 · realized +0.00 · unrealized +303.90
+15:19:12 INFO    TICK 190 · rank 1/3 · net_worth 158,402.01 · realized +0.00 · unrealized +301.34
+15:19:14 INFO    TICK 192 · rank 1/3 · net_worth 158,399.61 · realized +0.00 · unrealized +303.33
+15:19:16 INFO    TICK 194 · rank 1/3 · net_worth 158,400.01 · realized +0.00 · unrealized +303.72
+15:19:18 INFO    TICK 196 · rank 1/3 · net_worth 158,400.41 · realized +0.00 · unrealized +304.01
+15:19:20 INFO    TICK 198 · rank 1/3 · net_worth 158,400.81 · realized +0.00 · unrealized +305.28
+15:19:22 INFO    TICK 200 · rank 1/3 · net_worth 158,398.41 · realized +0.00 · unrealized +302.00
+15:19:24 INFO    TICK 202 · rank 1/3 · net_worth 158,399.01 · realized +0.00 · unrealized +300.43
+15:19:26 INFO    TICK 204 · rank 1/3 · net_worth 158,399.41 · realized +0.00 · unrealized +301.56
+15:19:28 INFO    TICK 206 · rank 1/3 · net_worth 158,397.81 · realized +0.00 · unrealized +299.39
+15:19:30 INFO    TICK 208 · rank 1/3 · net_worth 158,401.81 · realized +0.00 · unrealized +301.35
+15:19:32 INFO    TICK 210 · rank 1/3 · net_worth 158,406.21 · realized +0.00 · unrealized +301.04
+15:19:34 INFO    TICK 212 · rank 1/3 · net_worth 158,408.21 · realized +0.00 · unrealized +302.42
+15:19:36 INFO    BOOKS · net_worth 158,408.21 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.35     +111.56
+    AMD        +20     164.77     178.07     +266.01
+    AMZN       +20     194.75     196.50      +34.92
+    GOOGL      +20     174.96     180.90     +118.73
+    INTC       +20      21.99      24.64      +52.99
+    META       +20     579.91     583.36      +69.03
+    MSFT       +20     414.44     419.31      +97.47
+    NFLX       +20     720.95     694.18     -535.34
+    NVDA       +20     130.23     133.08      +57.04
+    TSLA       +20     279.61     281.14      +30.65
+    cash 100,038.81 · realized +0.00 · unrealized +303.06 · fees 0.00 · interest/carry/dividends +38.81
+15:19:36 INFO    TICK 214 · rank 1/3 · net_worth 158,408.61 · realized +0.00 · unrealized +304.71
+15:19:38 INFO    TICK 216 · rank 1/3 · net_worth 158,409.01 · realized +0.00 · unrealized +305.25
+15:19:40 INFO    TICK 218 · rank 1/3 · net_worth 158,409.41 · realized +0.00 · unrealized +305.21
+15:19:42 INFO    TICK 220 · rank 1/3 · net_worth 158,409.81 · realized +0.00 · unrealized +304.50
+15:19:44 INFO    TICK 222 · rank 1/3 · net_worth 158,409.21 · realized +0.00 · unrealized +301.51
+15:19:46 INFO    TICK 224 · rank 1/3 · net_worth 158,409.61 · realized +0.00 · unrealized +302.43
+15:19:48 INFO    TICK 226 · rank 1/3 · net_worth 158,410.01 · realized +0.00 · unrealized +302.38
+15:19:50 INFO    TICK 228 · rank 1/3 · net_worth 158,410.41 · realized +0.00 · unrealized +305.23
+15:19:52 INFO    TICK 230 · rank 1/3 · net_worth 158,410.61 · realized +0.00 · unrealized +304.46
+15:19:54 INFO    TICK 232 · rank 1/3 · net_worth 158,411.01 · realized +0.00 · unrealized +303.25
+15:19:56 INFO    TICK 234 · rank 1/3 · net_worth 158,411.41 · realized +0.00 · unrealized +304.85
+15:19:58 INFO    TICK 236 · rank 1/3 · net_worth 158,414.01 · realized +0.00 · unrealized +302.73
+15:20:00 INFO    TICK 237 · rank 1/3 · net_worth 158,413.21 · realized +0.00 · unrealized +300.91
+15:20:02 INFO    TICK 240 · rank 1/3 · net_worth 158,413.21 · realized +0.00 · unrealized +300.44
+15:20:04 INFO    TICK 242 · rank 1/3 · net_worth 158,406.41 · realized +0.00 · unrealized +295.42
+15:20:06 INFO    BOOKS · net_worth 158,406.41 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.30     +110.62
+    AMD        +20     164.77     178.01     +264.84
+    AMZN       +20     194.75     196.49      +34.79
+    GOOGL      +20     174.96     180.92     +119.26
+    INTC       +20      21.99      24.66      +53.46
+    META       +20     579.91     583.27      +67.30
+    MSFT       +20     414.44     419.57     +102.68
+    NFLX       +20     720.95     693.70     -544.89
+    NVDA       +20     130.23     133.06      +56.70
+    TSLA       +20     279.61     281.06      +29.01
+    cash 100,044.81 · realized +0.00 · unrealized +293.77 · fees 0.00 · interest/carry/dividends +44.81
+15:20:06 INFO    TICK 244 · rank 1/3 · net_worth 158,407.21 · realized +0.00 · unrealized +294.51
+15:20:08 INFO    TICK 246 · rank 1/3 · net_worth 158,407.61 · realized +0.00 · unrealized +293.90
+15:20:10 INFO    TICK 248 · rank 1/3 · net_worth 158,408.01 · realized +0.00 · unrealized +295.50
+15:20:11 INFO    Session event: CALENDAR — Upcoming: earnings AMZN @ t350
+15:20:12 INFO    TICK 250 · rank 1/3 · net_worth 158,408.41 · realized +0.00 · unrealized +297.02
+15:20:14 INFO    TICK 252 · rank 1/3 · net_worth 158,400.01 · realized +0.00 · unrealized +289.53
+15:20:16 INFO    TICK 254 · rank 1/3 · net_worth 158,400.41 · realized +0.00 · unrealized +291.71
+15:20:19 INFO    TICK 256 · rank 1/3 · net_worth 158,400.81 · realized +0.00 · unrealized +291.79
+15:20:21 INFO    TICK 258 · rank 1/3 · net_worth 158,401.21 · realized +0.00 · unrealized +291.55
+15:20:23 INFO    TICK 260 · rank 1/3 · net_worth 158,401.61 · realized +0.00 · unrealized +290.63
+15:20:25 INFO    TICK 262 · rank 1/3 · net_worth 158,402.01 · realized +0.00 · unrealized +293.38
+15:20:27 INFO    TICK 264 · rank 1/3 · net_worth 158,402.41 · realized +0.00 · unrealized +296.89
+15:20:29 INFO    TICK 266 · rank 1/3 · net_worth 158,405.01 · realized +0.00 · unrealized +297.74
+15:20:31 INFO    TICK 268 · rank 1/3 · net_worth 158,407.01 · realized +0.00 · unrealized +296.72
+15:20:33 INFO    TICK 270 · rank 1/3 · net_worth 158,408.41 · realized +0.00 · unrealized +296.74
+15:20:35 INFO    TICK 272 · rank 1/3 · net_worth 158,413.21 · realized +0.00 · unrealized +301.31
+15:20:36 INFO    BOOKS · net_worth 158,413.21 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.62     +116.95
+    AMD        +20     164.77     177.99     +264.36
+    AMZN       +20     194.75     196.47      +34.41
+    GOOGL      +20     174.96     180.90     +118.86
+    INTC       +20      21.99      24.65      +53.33
+    META       +20     579.91     583.48      +71.36
+    MSFT       +20     414.44     419.63     +103.86
+    NFLX       +20     720.95     693.42     -550.46
+    NVDA       +20     130.23     133.14      +58.14
+    TSLA       +20     279.61     281.18      +31.33
+    cash 100,050.81 · realized +0.00 · unrealized +302.15 · fees 0.00 · interest/carry/dividends +50.81
+15:20:37 INFO    TICK 274 · rank 1/3 · net_worth 158,413.61 · realized +0.00 · unrealized +300.27
+15:20:39 INFO    TICK 276 · rank 1/3 · net_worth 158,414.01 · realized +0.00 · unrealized +301.94
+15:20:41 INFO    TICK 278 · rank 1/3 · net_worth 158,414.41 · realized +0.00 · unrealized +299.43
+15:20:43 INFO    TICK 280 · rank 1/3 · net_worth 158,408.01 · realized +0.00 · unrealized +291.88
+15:20:45 INFO    TICK 282 · rank 1/3 · net_worth 158,409.61 · realized +0.00 · unrealized +293.65
+15:20:47 INFO    TICK 284 · rank 1/3 · net_worth 158,409.61 · realized +0.00 · unrealized +293.57
+15:20:49 INFO    TICK 286 · rank 1/3 · net_worth 158,410.01 · realized +0.00 · unrealized +292.66
+15:20:51 INFO    TICK 288 · rank 1/3 · net_worth 158,402.21 · realized +0.00 · unrealized +285.18
+15:20:53 INFO    TICK 290 · rank 1/3 · net_worth 158,402.61 · realized +0.00 · unrealized +285.34
+15:20:55 INFO    TICK 292 · rank 1/3 · net_worth 158,395.61 · realized +0.00 · unrealized +280.68
+15:20:57 INFO    TICK 294 · rank 1/3 · net_worth 158,399.62 · realized +0.00 · unrealized +285.07
+15:20:59 INFO    TICK 296 · rank 1/3 · net_worth 158,403.22 · realized +0.00 · unrealized +288.10
+15:21:01 INFO    TICK 298 · rank 1/3 · net_worth 158,406.02 · realized +0.00 · unrealized +290.92
+15:21:03 INFO    TICK 300 · rank 1/3 · net_worth 158,410.42 · realized +0.00 · unrealized +293.33
+15:21:05 INFO    TICK 302 · rank 1/3 · net_worth 158,416.62 · realized +0.00 · unrealized +297.84
+15:21:06 INFO    BOOKS · net_worth 158,416.62 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.68     +118.14
+    AMD        +20     164.77     178.18     +268.30
+    AMZN       +20     194.75     196.57      +36.46
+    GOOGL      +20     174.96     180.92     +119.15
+    INTC       +20      21.99      24.61      +52.47
+    META       +20     579.91     583.53      +72.37
+    MSFT       +20     414.44     419.46     +100.50
+    NFLX       +20     720.95     692.30     -572.98
+    NVDA       +20     130.23     133.36      +62.72
+    TSLA       +20     279.61     281.67      +41.19
+    cash 100,056.82 · realized +0.00 · unrealized +298.33 · fees 0.00 · interest/carry/dividends +56.82
+15:21:07 INFO    TICK 304 · rank 1/3 · net_worth 158,417.02 · realized +0.00 · unrealized +297.49
+15:21:09 INFO    TICK 306 · rank 1/3 · net_worth 158,417.22 · realized +0.00 · unrealized +296.67
+15:21:11 INFO    TICK 308 · rank 1/3 · net_worth 158,417.62 · realized +0.00 · unrealized +295.96
+15:21:13 INFO    TICK 310 · rank 1/3 · net_worth 158,418.02 · realized +0.00 · unrealized +295.95
+15:21:15 INFO    TICK 312 · rank 1/3 · net_worth 158,419.82 · realized +0.00 · unrealized +294.90
+15:21:17 INFO    TICK 314 · rank 1/3 · net_worth 158,423.02 · realized +0.00 · unrealized +297.13
+15:21:19 INFO    TICK 316 · rank 1/3 · net_worth 158,416.42 · realized +0.00 · unrealized +291.39
+15:21:21 INFO    TICK 318 · rank 1/3 · net_worth 158,416.82 · realized +0.00 · unrealized +293.76
+15:21:23 INFO    TICK 320 · rank 1/3 · net_worth 158,420.62 · realized +0.00 · unrealized +297.32
+15:21:25 INFO    TICK 322 · rank 1/3 · net_worth 158,421.02 · realized +0.00 · unrealized +296.13
+15:21:27 INFO    TICK 324 · rank 1/3 · net_worth 158,424.42 · realized +0.00 · unrealized +299.74
+15:21:29 INFO    TICK 326 · rank 1/3 · net_worth 158,424.22 · realized +0.00 · unrealized +297.14
+15:21:31 INFO    TICK 328 · rank 1/3 · net_worth 158,425.02 · realized +0.00 · unrealized +296.95
+15:21:33 INFO    TICK 330 · rank 1/3 · net_worth 158,426.22 · realized +0.00 · unrealized +296.76
+15:21:35 INFO    TICK 332 · rank 1/3 · net_worth 158,424.42 · realized +0.00 · unrealized +290.47
+15:21:36 INFO    BOOKS · net_worth 158,424.42 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.64     +117.38
+    AMD        +20     164.77     178.13     +267.33
+    AMZN       +20     194.75     196.47      +34.39
+    GOOGL      +20     174.96     180.93     +119.39
+    INTC       +20      21.99      24.60      +52.37
+    META       +20     579.91     583.17      +65.20
+    MSFT       +20     414.44     419.50     +101.31
+    NFLX       +20     720.95     691.85     -581.90
+    NVDA       +20     130.23     133.43      +63.93
+    TSLA       +20     279.61     282.10      +49.87
+    cash 100,062.82 · realized +0.00 · unrealized +289.28 · fees 0.00 · interest/carry/dividends +62.82
+15:21:37 INFO    TICK 334 · rank 1/3 · net_worth 158,424.82 · realized +0.00 · unrealized +289.30
+15:21:39 INFO    TICK 336 · rank 1/3 · net_worth 158,417.82 · realized +0.00 · unrealized +280.67
+15:21:41 INFO    TICK 338 · rank 1/3 · net_worth 158,418.22 · realized +0.00 · unrealized +279.32
+15:21:43 INFO    TICK 340 · rank 1/3 · net_worth 158,410.62 · realized +0.00 · unrealized +274.00
+15:21:45 INFO    TICK 342 · rank 1/3 · net_worth 158,411.42 · realized +0.00 · unrealized +271.60
+15:21:47 INFO    TICK 344 · rank 1/3 · net_worth 158,411.82 · realized +0.00 · unrealized +273.52
+15:21:49 INFO    TICK 346 · rank 1/3 · net_worth 158,412.22 · realized +0.00 · unrealized +275.92
+15:21:51 INFO    TICK 348 · rank 1/3 · net_worth 158,412.62 · realized +0.00 · unrealized +273.81
+15:21:53 INFO    TICK 350 · rank 1/3 · net_worth 158,413.02 · realized +0.00 · unrealized +275.09
+15:21:55 INFO    TICK 352 · rank 1/3 · net_worth 158,413.42 · realized +0.00 · unrealized +273.85
+15:21:57 INFO    TICK 354 · rank 1/3 · net_worth 158,410.82 · realized +0.00 · unrealized +271.53
+15:21:59 INFO    TICK 356 · rank 1/3 · net_worth 158,410.02 · realized +0.00 · unrealized +271.78
+15:22:01 INFO    TICK 358 · rank 1/3 · net_worth 158,410.42 · realized +0.00 · unrealized +270.24
+15:22:03 INFO    TICK 360 · rank 1/3 · net_worth 158,411.02 · realized +0.00 · unrealized +268.71
+15:22:05 INFO    TICK 362 · rank 1/3 · net_worth 158,408.42 · realized +0.00 · unrealized +266.89
+15:22:06 INFO    BOOKS · net_worth 158,408.42 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.65     +117.56
+    AMD        +20     164.77     178.16     +267.86
+    AMZN       +20     194.75     196.46      +34.23
+    GOOGL      +20     174.96     180.91     +119.01
+    INTC       +20      21.99      24.60      +52.34
+    META       +20     579.91     583.05      +62.77
+    MSFT       +20     414.44     419.43      +99.89
+    NFLX       +20     720.95     691.14     -596.14
+    NVDA       +20     130.23     133.46      +64.73
+    TSLA       +20     279.61     281.89      +45.57
+    cash 100,068.82 · realized +0.00 · unrealized +267.83 · fees 0.00 · interest/carry/dividends +68.82
+15:22:07 INFO    TICK 364 · rank 1/3 · net_worth 158,408.82 · realized +0.00 · unrealized +266.60
+15:22:09 INFO    TICK 366 · rank 1/3 · net_worth 158,409.22 · realized +0.00 · unrealized +267.70
+15:22:11 INFO    TICK 368 · rank 1/3 · net_worth 158,411.62 · realized +0.00 · unrealized +268.87
+15:22:12 INFO    Session event: CALENDAR_EVENT — Earnings: AMZN moving +3.5%
+15:22:12 INFO    Order sent: buy 60 AMZN @ 200.18 (IOC)
+15:22:12 INFO    ACK 48a9d113 buy 60 AMZN @ 200.18
+15:22:12 INFO    FILL buy 12 AMZN @ 196.90 (fee 3.54) → AMZN +32 @ 195.56 (mark 196.43, unrealized +27.91) · cash 97,703.68 · realized +0.00 · unrealized +263.26 · fees 3.54 · interest/carry/dividends +70.02
+15:22:12 INFO    FILL buy 10 AMZN @ 196.98 (fee 2.95) → AMZN +42 @ 195.90 (mark 197.03, unrealized +47.61) · cash 95,730.92 · realized +0.00 · unrealized +282.96 · fees 6.50 · interest/carry/dividends +70.02
+15:22:12 INFO    FILL buy 20 AMZN @ 197.13 (fee 5.91) → AMZN +62 @ 196.29 (mark 197.03, unrealized +45.88) · cash 91,782.41 · realized +0.00 · unrealized +281.22 · fees 12.41 · interest/carry/dividends +70.02
+15:22:12 INFO    FILL buy 18 AMZN @ 197.28 (fee 5.33) → AMZN +80 @ 196.52 (mark 197.04, unrealized +41.95) · cash 88,226.04 · realized +0.00 · unrealized +277.29 · fees 17.74 · interest/carry/dividends +70.02
+15:22:12 INFO    Order sent: buy 12 AMZN @ 200.18 (IOC)
+15:22:12 INFO    ACK 78fe49b9 buy 12 AMZN @ 200.18
+15:22:12 INFO    FILL buy 12 AMZN @ 197.28 (fee 3.55) → AMZN +92 @ 196.62 (mark 197.05, unrealized +39.62) · cash 85,855.13 · realized +0.00 · unrealized +270.23 · fees 21.29 · interest/carry/dividends +70.02
+15:22:12 INFO    Order sent: buy 58 AMZN @ 200.18 (IOC)
+15:22:12 INFO    ACK 059ef1e5 buy 58 AMZN @ 200.18
+15:22:12 INFO    FILL buy 10 AMZN @ 197.60 (fee 2.96) → AMZN +102 @ 196.71 (mark 197.05, unrealized +34.57) · cash 83,876.17 · realized +0.00 · unrealized +265.14 · fees 24.25 · interest/carry/dividends +70.02
+15:22:12 INFO    FILL buy 20 AMZN @ 197.75 (fee 5.93) → AMZN +122 @ 196.88 (mark 197.06, unrealized +21.13) · cash 79,915.23 · realized +0.00 · unrealized +251.71 · fees 30.19 · interest/carry/dividends +70.02
+15:22:12 INFO    FILL buy 28 AMZN @ 197.90 (fee 8.31) → AMZN +150 @ 197.07 (mark 197.06, unrealized -1.57) · cash 74,365.72 · realized +0.00 · unrealized +229.00 · fees 38.50 · interest/carry/dividends +70.02
+15:22:13 INFO    TICK 370 · rank 1/3 · net_worth 158,361.57 · realized +0.00 · unrealized +316.65
+15:22:15 INFO    TICK 372 · rank 1/3 · net_worth 158,538.87 · realized +0.00 · unrealized +493.75
+15:22:17 INFO    TICK 374 · rank 1/3 · net_worth 158,713.17 · realized +0.00 · unrealized +668.21
+15:22:19 INFO    TICK 376 · rank 1/3 · net_worth 158,879.97 · realized +0.00 · unrealized +838.33
+15:22:21 INFO    TICK 378 · rank 1/3 · net_worth 159,056.26 · realized +0.00 · unrealized +1,016.30
+15:22:23 INFO    TICK 380 · rank 1/3 · net_worth 159,232.76 · realized +0.00 · unrealized +1,194.63
+15:22:25 INFO    TICK 382 · rank 1/3 · net_worth 159,404.56 · realized +0.00 · unrealized +1,364.02
+15:22:26 INFO    Order sent: sell 60 AMZN @ 203.83 (IOC)
+15:22:26 INFO    ACK e816abb3 sell 60 AMZN @ 203.83
+15:22:26 INFO    FILL sell 10 AMZN @ 204.85 (fee 3.07) → AMZN +140 @ 197.07 (mark 204.67, unrealized +1,063.52) · cash 76,413.29 · realized +77.78 · unrealized +1,287.75 · fees 41.57 · interest/carry/dividends +72.16
+15:22:26 INFO    FILL sell 20 AMZN @ 204.70 (fee 6.14) → AMZN +120 @ 197.07 (mark 204.66, unrealized +911.05) · cash 80,501.15 · realized +230.34 · unrealized +1,135.28 · fees 47.71 · interest/carry/dividends +72.16
+15:22:26 INFO    FILL sell 30 AMZN @ 204.55 (fee 9.20) → AMZN +90 @ 197.07 (mark 204.66, unrealized +682.71) · cash 86,628.44 · realized +454.67 · unrealized +906.94 · fees 56.92 · interest/carry/dividends +72.16
+15:22:27 INFO    Order sent: sell 60 AMZN @ 204.39 (IOC)
+15:22:27 INFO    ACK 402f1f70 sell 60 AMZN @ 204.39
+15:22:27 INFO    FILL sell 10 AMZN @ 205.42 (fee 3.08) → AMZN +80 @ 197.07 (mark 205.24, unrealized +653.80) · cash 88,679.56 · realized +538.15 · unrealized +873.25 · fees 60.00 · interest/carry/dividends +72.16
+15:22:27 INFO    FILL sell 20 AMZN @ 205.27 (fee 6.16) → AMZN +60 @ 197.07 (mark 205.24, unrealized +490.08) · cash 92,778.80 · realized +702.11 · unrealized +709.52 · fees 66.16 · interest/carry/dividends +72.16
+15:22:27 INFO    FILL sell 30 AMZN @ 205.11 (fee 9.23) → AMZN +30 @ 197.07 (mark 205.23, unrealized +244.85) · cash 98,922.87 · realized +943.24 · unrealized +464.29 · fees 75.39 · interest/carry/dividends +72.16
+15:22:27 INFO    TICK 384 · rank 1/3 · net_worth 159,196.84 · realized +943.24 · unrealized +455.07
+15:22:28 INFO    Order sent: sell 10 AMZN @ 204.09 (IOC)
+15:22:28 INFO    ACK 46efb01f sell 10 AMZN @ 204.09
+15:22:28 INFO    FILL sell 10 AMZN @ 205.12 (fee 3.08) → AMZN +20 @ 197.07 (mark 204.94, unrealized +157.41) · cash 100,971.36 · realized +1,023.72 · unrealized +376.36 · fees 78.46 · interest/carry/dividends +72.53
+15:22:29 INFO    TICK 386 · rank 1/3 · net_worth 159,456.37 · realized +1,023.72 · unrealized +365.00
+15:22:31 INFO    TICK 388 · rank 1/3 · net_worth 159,445.37 · realized +1,023.72 · unrealized +353.25
+15:22:33 INFO    TICK 390 · rank 1/3 · net_worth 159,435.18 · realized +1,023.72 · unrealized +341.95
+15:22:35 INFO    TICK 392 · rank 1/3 · net_worth 159,437.18 · realized +1,023.72 · unrealized +356.65
+15:22:37 INFO    BOOKS · net_worth 159,437.18 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.77     +120.01
+    AMD        +20     164.77     178.89     +282.50
+    AMZN       +20     197.07     203.93     +137.24
+    GOOGL      +20     174.96     180.83     +117.40
+    INTC       +20      21.99      24.62      +52.70
+    META       +20     579.91     581.78      +37.50
+    MSFT       +20     414.44     419.38      +98.83
+    NFLX       +20     720.95     691.04     -598.09
+    NVDA       +20     130.23     133.57      +66.86
+    TSLA       +20     279.61     281.88      +45.36
+    cash 100,972.98 · realized +1,023.72 · unrealized +360.30 · fees 78.46 · interest/carry/dividends +74.14
+15:22:37 INFO    TICK 394 · rank 1/3 · net_worth 159,446.59 · realized +1,023.72 · unrealized +365.29
+15:22:39 INFO    TICK 396 · rank 1/3 · net_worth 159,455.59 · realized +1,023.72 · unrealized +371.75
+15:22:41 INFO    TICK 398 · rank 1/3 · net_worth 159,454.59 · realized +1,023.72 · unrealized +370.03
+15:22:43 INFO    TICK 400 · rank 1/3 · net_worth 159,454.60 · realized +1,023.72 · unrealized +368.42
+15:22:45 INFO    TICK 402 · rank 1/3 · net_worth 159,456.40 · realized +1,023.72 · unrealized +370.20
+15:22:47 INFO    TICK 404 · rank 1/3 · net_worth 159,450.80 · realized +1,023.72 · unrealized +362.33
+15:22:49 INFO    TICK 406 · rank 1/3 · net_worth 159,451.21 · realized +1,023.72 · unrealized +361.76
+15:22:51 INFO    TICK 408 · rank 1/3 · net_worth 159,447.01 · realized +1,023.72 · unrealized +358.34
+15:22:53 INFO    TICK 410 · rank 1/3 · net_worth 159,449.62 · realized +1,023.72 · unrealized +360.74
+15:22:55 INFO    TICK 412 · rank 1/3 · net_worth 159,455.02 · realized +1,023.72 · unrealized +365.87
+15:22:57 INFO    TICK 414 · rank 1/3 · net_worth 159,460.02 · realized +1,023.72 · unrealized +368.09
+15:22:59 INFO    TICK 416 · rank 1/3 · net_worth 159,459.23 · realized +1,023.72 · unrealized +368.34
+15:23:01 INFO    TICK 418 · rank 1/3 · net_worth 159,461.83 · realized +1,023.72 · unrealized +370.37
+15:23:03 INFO    TICK 420 · rank 1/3 · net_worth 159,462.24 · realized +1,023.72 · unrealized +368.16
+15:23:05 INFO    TICK 422 · rank 1/3 · net_worth 159,462.64 · realized +1,023.72 · unrealized +366.69
+15:23:07 INFO    BOOKS · net_worth 159,462.64 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.86     +121.77
+    AMD        +20     164.77     178.92     +282.99
+    AMZN       +20     197.07     204.91     +156.70
+    GOOGL      +20     174.96     180.83     +117.40
+    INTC       +20      21.99      24.63      +52.78
+    META       +20     579.91     580.85      +18.88
+    MSFT       +20     414.44     419.33      +97.85
+    NFLX       +20     720.95     690.77     -603.56
+    NVDA       +20     130.23     133.82      +71.75
+    TSLA       +20     279.61     282.10      +49.80
+    cash 100,979.04 · realized +1,023.72 · unrealized +366.36 · fees 78.46 · interest/carry/dividends +80.20
+15:23:07 INFO    TICK 424 · rank 1/3 · net_worth 159,463.04 · realized +1,023.72 · unrealized +363.63
+15:23:09 INFO    TICK 426 · rank 1/3 · net_worth 159,465.45 · realized +1,023.72 · unrealized +365.02
+15:23:11 INFO    TICK 428 · rank 1/3 · net_worth 159,465.85 · realized +1,023.72 · unrealized +367.94
+15:23:13 INFO    TICK 430 · rank 1/3 · net_worth 159,459.86 · realized +1,023.72 · unrealized +362.26
+15:23:15 INFO    TICK 432 · rank 1/3 · net_worth 159,459.46 · realized +1,023.72 · unrealized +358.52
+15:23:17 INFO    TICK 434 · rank 1/3 · net_worth 159,454.66 · realized +1,023.72 · unrealized +354.56
+15:23:19 INFO    TICK 436 · rank 1/3 · net_worth 159,457.27 · realized +1,023.72 · unrealized +355.27
+15:23:21 INFO    TICK 438 · rank 1/3 · net_worth 159,445.67 · realized +1,023.72 · unrealized +341.55
+15:23:23 INFO    TICK 440 · rank 1/3 · net_worth 159,440.88 · realized +1,023.72 · unrealized +337.11
+15:23:25 INFO    TICK 442 · rank 1/3 · net_worth 159,433.68 · realized +1,023.72 · unrealized +329.84
+15:23:27 INFO    TICK 444 · rank 1/3 · net_worth 159,434.08 · realized +1,023.72 · unrealized +329.76
+15:23:29 INFO    TICK 446 · rank 1/3 · net_worth 159,426.09 · realized +1,023.72 · unrealized +323.50
+15:23:31 INFO    TICK 448 · rank 1/3 · net_worth 159,416.49 · realized +1,023.72 · unrealized +312.17
+15:23:33 INFO    TICK 450 · rank 1/3 · net_worth 159,410.49 · realized +1,023.72 · unrealized +305.55
+15:23:35 INFO    TICK 452 · rank 1/3 · net_worth 159,407.90 · realized +1,023.72 · unrealized +301.74
+15:23:37 INFO    BOOKS · net_worth 159,407.90 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.96     +123.78
+    AMD        +20     164.77     178.89     +282.43
+    AMZN       +20     197.07     205.19     +162.29
+    GOOGL      +20     174.96     180.71     +114.91
+    INTC       +20      21.99      24.63      +52.78
+    META       +20     579.91     580.57      +13.18
+    MSFT       +20     414.44     419.24      +95.98
+    NFLX       +20     720.95     689.07     -637.45
+    NVDA       +20     130.23     133.76      +70.64
+    TSLA       +20     279.61     280.75      +22.76
+    cash 100,985.10 · realized +1,023.72 · unrealized +301.30 · fees 78.46 · interest/carry/dividends +86.26
+15:23:37 INFO    TICK 454 · rank 1/3 · net_worth 159,408.30 · realized +1,023.72 · unrealized +300.66
+15:23:39 INFO    TICK 456 · rank 1/3 · net_worth 159,408.71 · realized +1,023.72 · unrealized +301.03
+15:23:41 INFO    TICK 458 · rank 1/3 · net_worth 159,409.11 · realized +1,023.72 · unrealized +302.16
+15:23:43 INFO    TICK 460 · rank 1/3 · net_worth 159,408.91 · realized +1,023.72 · unrealized +304.83
+15:23:45 INFO    TICK 462 · rank 1/3 · net_worth 159,406.32 · realized +1,023.72 · unrealized +306.93
+15:23:47 INFO    TICK 464 · rank 1/3 · net_worth 159,406.12 · realized +1,023.72 · unrealized +305.49
+15:23:49 INFO    TICK 466 · rank 1/3 · net_worth 159,404.13 · realized +1,023.72 · unrealized +301.84
+15:23:51 INFO    TICK 468 · rank 1/3 · net_worth 159,402.13 · realized +1,023.72 · unrealized +297.03
+15:23:52 INFO    IPO ALLOCATED 150 ORCA @ 24.00
+15:23:52 INFO    Session event: IPO_PRICED — ORCA priced at $24.00 — 150 shares subscribed for 4,000 offered; lists t550
+15:23:53 INFO    TICK 470 · rank 1/3 · net_worth 159,403.72 · realized +1,023.72 · unrealized +297.66
+15:23:55 INFO    TICK 472 · rank 1/3 · net_worth 159,404.31 · realized +1,023.72 · unrealized +297.04
+15:23:57 INFO    TICK 474 · rank 1/3 · net_worth 159,404.10 · realized +1,023.72 · unrealized +293.50
+15:23:59 INFO    TICK 476 · rank 1/3 · net_worth 159,397.49 · realized +1,023.72 · unrealized +287.48
+15:24:01 INFO    TICK 478 · rank 1/3 · net_worth 159,395.48 · realized +1,023.72 · unrealized +283.54
+15:24:03 INFO    TICK 480 · rank 1/3 · net_worth 159,395.87 · realized +1,023.72 · unrealized +281.18
+15:24:05 INFO    TICK 482 · rank 1/3 · net_worth 159,391.26 · realized +1,023.72 · unrealized +277.30
+15:24:07 INFO    BOOKS · net_worth 159,391.26 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.96     +123.84
+    AMD        +20     164.77     178.71     +278.87
+    AMZN       +20     197.07     205.27     +163.96
+    GOOGL      +20     174.96     180.74     +115.63
+    INTC       +20      21.99      24.61      +52.54
+    META       +20     579.91     580.56      +13.05
+    MSFT       +20     414.44     419.11      +93.48
+    NFLX       +20     720.95     688.41     -650.80
+    NVDA       +20     130.23     133.80      +71.38
+    ORCA      +150      24.00      24.00       +0.00
+    TSLA       +20     279.61     280.27      +13.26
+    cash 97,391.06 · realized +1,023.72 · unrealized +275.21 · fees 78.46 · interest/carry/dividends +92.22
+15:24:07 WARNING INDUCED DROP after 480s — closing the socket
+15:24:07 WARNING DISCONNECT: exchange closed the connection
+15:24:07 WARNING RECONNECT in 0.7s
+15:24:07 INFO    Connected to ws://localhost:8799 as 6_rings_trader_2 (trader)
+15:24:07 INFO    CONNECT #2 as 6_rings_trader_2
+15:24:07 INFO    RESYNC book from first snapshot (AAPL bid 226.72 ask 227.03)
+15:24:07 INFO    TICK 484 · rank 1/3 · net_worth 159,386.05 · realized +1,023.72 · unrealized +273.72
+15:24:07 INFO    RESYNC from leaderboard — books already agree
+15:24:07 INFO    BOOKS · net_worth 159,386.05 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.95     +123.69
+    AMD        +20     164.77     178.70     +278.66
+    AMZN       +20     197.07     205.27     +164.02
+    GOOGL      +20     174.96     180.75     +115.72
+    INTC       +20      21.99      24.61      +52.53
+    META       +20     579.91     580.57      +13.23
+    MSFT       +20     414.44     419.09      +92.95
+    NFLX       +20     720.95     688.37     -651.55
+    NVDA       +20     130.23     133.79      +71.17
+    ORCA      +150      24.00      24.00       +0.00
+    TSLA       +20     279.61     280.27      +13.30
+    cash 97,391.45 · realized +1,023.72 · unrealized +273.72 · fees 78.46 · interest/carry/dividends +92.22
+15:24:07 INFO    Session event: FEE_SCHEDULE — Venue fee schedule: taker 15.0 bps, maker rebate 10.0 bps
+15:24:07 INFO    Session event: SESSION_OPEN — Session already open — you joined mid-session.
+15:24:09 INFO    TICK 486 · rank 1/3 · net_worth 159,386.44 · realized +1,023.72 · unrealized +276.73
+15:24:11 INFO    TICK 488 · rank 1/3 · net_worth 159,386.83 · realized +1,023.72 · unrealized +275.38
+15:24:13 INFO    TICK 490 · rank 1/3 · net_worth 159,384.42 · realized +1,023.72 · unrealized +271.21
+15:24:15 INFO    TICK 492 · rank 1/3 · net_worth 159,384.81 · realized +1,023.72 · unrealized +273.69
+15:24:17 INFO    TICK 494 · rank 1/3 · net_worth 159,383.99 · realized +1,023.72 · unrealized +271.00
+15:24:19 INFO    TICK 496 · rank 1/3 · net_worth 159,385.58 · realized +1,023.72 · unrealized +271.91
+15:24:21 INFO    TICK 498 · rank 1/3 · net_worth 159,381.37 · realized +1,023.72 · unrealized +271.89
+15:24:22 INFO    Session event: CALENDAR — Upcoming: dividend AAPL @ t600
+15:24:23 INFO    TICK 500 · rank 1/3 · net_worth 159,380.56 · realized +1,023.72 · unrealized +269.65
+15:24:25 INFO    TICK 502 · rank 1/3 · net_worth 159,379.75 · realized +1,023.72 · unrealized +272.02
+15:24:27 INFO    TICK 504 · rank 1/3 · net_worth 159,380.14 · realized +1,023.72 · unrealized +272.24
+15:24:29 INFO    TICK 506 · rank 1/3 · net_worth 159,378.33 · realized +1,023.72 · unrealized +269.24
+15:24:31 INFO    TICK 508 · rank 1/3 · net_worth 159,377.12 · realized +1,023.72 · unrealized +266.44
+15:24:33 INFO    TICK 510 · rank 1/3 · net_worth 159,374.51 · realized +1,023.72 · unrealized +265.01
+15:24:35 INFO    TICK 512 · rank 1/3 · net_worth 159,374.70 · realized +1,023.72 · unrealized +265.84
+15:24:37 INFO    TICK 514 · rank 1/3 · net_worth 159,375.09 · realized +1,023.72 · unrealized +266.50
+15:24:37 INFO    BOOKS · net_worth 159,375.09 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.81     +120.76
+    AMD        +20     164.77     178.82     +280.94
+    AMZN       +20     197.07     205.39     +166.41
+    GOOGL      +20     174.96     180.74     +115.62
+    INTC       +20      21.99      24.60      +52.28
+    META       +20     579.91     580.63      +14.41
+    MSFT       +20     414.44     419.05      +92.25
+    NFLX       +20     720.95     688.48     -649.26
+    NVDA       +20     130.23     133.62      +67.82
+    ORCA      +150      24.00      24.00       +0.00
+    TSLA       +20     279.61     279.87       +5.25
+    cash 97,397.29 · realized +1,023.72 · unrealized +266.50 · fees 78.46 · interest/carry/dividends +98.06
+15:24:39 INFO    TICK 516 · rank 1/3 · net_worth 159,375.48 · realized +1,023.72 · unrealized +266.22
+15:24:41 INFO    TICK 518 · rank 1/3 · net_worth 159,375.87 · realized +1,023.72 · unrealized +269.22
+15:24:43 INFO    TICK 520 · rank 1/3 · net_worth 159,378.66 · realized +1,023.72 · unrealized +272.36
+15:24:45 INFO    TICK 522 · rank 1/3 · net_worth 159,379.05 · realized +1,023.72 · unrealized +273.28
+15:24:47 INFO    TICK 524 · rank 1/3 · net_worth 159,380.44 · realized +1,023.72 · unrealized +275.09
+15:24:49 INFO    TICK 526 · rank 1/3 · net_worth 159,380.83 · realized +1,023.72 · unrealized +272.51
+15:24:51 INFO    TICK 528 · rank 1/3 · net_worth 159,379.02 · realized +1,023.72 · unrealized +271.38
+15:24:53 INFO    TICK 530 · rank 1/3 · net_worth 159,378.21 · realized +1,023.72 · unrealized +270.11
+15:24:55 INFO    TICK 532 · rank 1/3 · net_worth 159,379.40 · realized +1,023.72 · unrealized +267.85
+15:24:57 INFO    TICK 534 · rank 1/3 · net_worth 159,378.39 · realized +1,023.72 · unrealized +266.45
+15:24:59 INFO    TICK 536 · rank 1/3 · net_worth 159,377.78 · realized +1,023.72 · unrealized +263.12
+15:25:01 INFO    TICK 538 · rank 1/3 · net_worth 159,373.77 · realized +1,023.72 · unrealized +261.03
+15:25:03 INFO    TICK 540 · rank 1/3 · net_worth 159,374.16 · realized +1,023.72 · unrealized +259.80
+15:25:05 INFO    TICK 542 · rank 1/3 · net_worth 159,374.54 · realized +1,023.72 · unrealized +256.95
+15:25:07 INFO    TICK 544 · rank 1/3 · net_worth 159,378.33 · realized +1,023.72 · unrealized +257.39
+15:25:07 INFO    BOOKS · net_worth 159,378.33 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.85     +121.53
+    AMD        +20     164.77     178.78     +280.21
+    AMZN       +20     197.07     205.45     +167.56
+    GOOGL      +20     174.96     180.76     +115.98
+    INTC       +20      21.99      24.60      +52.25
+    META       +20     579.91     580.63      +14.36
+    MSFT       +20     414.44     418.99      +91.09
+    NFLX       +20     720.95     688.39     -651.05
+    NVDA       +20     130.23     133.21      +59.58
+    ORCA      +150      24.00      24.00       +0.00
+    TSLA       +20     279.61     279.90       +5.88
+    cash 97,403.13 · realized +1,023.72 · unrealized +257.39 · fees 78.46 · interest/carry/dividends +103.90
+15:25:09 INFO    TICK 546 · rank 1/3 · net_worth 159,378.72 · realized +1,023.72 · unrealized +257.04
+15:25:11 INFO    TICK 548 · rank 1/3 · net_worth 159,379.11 · realized +1,023.72 · unrealized +257.57
+15:25:13 INFO    TICK 550 · rank 1/3 · net_worth 159,380.30 · realized +1,023.72 · unrealized +257.15
+15:25:15 INFO    TICK 552 · rank 1/3 · net_worth 159,380.69 · realized +1,023.72 · unrealized +254.35
+15:25:17 INFO    TICK 554 · rank 1/3 · net_worth 159,382.88 · realized +1,023.72 · unrealized +253.76
+15:25:19 INFO    TICK 556 · rank 1/3 · net_worth 159,383.27 · realized +1,023.72 · unrealized +253.11
+15:25:21 INFO    TICK 558 · rank 1/3 · net_worth 159,382.26 · realized +1,023.72 · unrealized +253.82
+15:25:23 INFO    TICK 560 · rank 1/3 · net_worth 159,382.25 · realized +1,023.72 · unrealized +252.34
+15:25:25 INFO    TICK 562 · rank 1/3 · net_worth 159,381.24 · realized +1,023.72 · unrealized +252.42
+15:25:27 INFO    TICK 564 · rank 1/3 · net_worth 159,381.63 · realized +1,023.72 · unrealized +252.38
+15:25:29 INFO    TICK 566 · rank 1/3 · net_worth 159,377.82 · realized +1,023.72 · unrealized +249.63
+15:25:31 INFO    TICK 568 · rank 1/3 · net_worth 159,378.21 · realized +1,023.72 · unrealized +248.11
+15:25:32 INFO    Session event: IPO_LISTED — ORCA is now trading — offered at $24.00. Where it belongs is yours to discover.
+15:25:33 INFO    TICK 570 · rank 1/3 · net_worth 159,369.30 · realized +1,023.72 · unrealized +352.22
+15:25:35 INFO    TICK 572 · rank 1/3 · net_worth 159,474.49 · realized +1,023.72 · unrealized +352.87
+15:25:37 INFO    TICK 574 · rank 1/3 · net_worth 159,474.88 · realized +1,023.72 · unrealized +354.52
+15:25:38 INFO    BOOKS · net_worth 159,474.88 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.75     +119.64
+    AMD        +20     164.77     178.72     +279.03
+    AMZN       +20     197.07     205.47     +167.94
+    GOOGL      +20     174.96     180.89     +118.59
+    INTC       +20      21.99      24.59      +52.11
+    META       +20     579.91     580.41      +10.02
+    MSFT       +20     414.44     418.79      +86.97
+    NFLX       +20     720.95     688.25     -653.88
+    NVDA       +20     130.23     133.20      +59.52
+    ORCA      +150      24.00      24.71     +107.20
+    TSLA       +20     279.61     279.98       +7.39
+    cash 97,408.98 · realized +1,023.72 · unrealized +354.52 · fees 78.46 · interest/carry/dividends +109.75
+15:25:39 INFO    TICK 576 · rank 1/3 · net_worth 159,476.77 · realized +1,023.72 · unrealized +355.28
+15:25:41 INFO    TICK 578 · rank 1/3 · net_worth 159,481.36 · realized +1,023.72 · unrealized +355.87
+15:25:43 INFO    TICK 580 · rank 1/3 · net_worth 159,487.95 · realized +1,023.72 · unrealized +357.98
+15:25:45 INFO    TICK 582 · rank 1/3 · net_worth 159,489.84 · realized +1,023.72 · unrealized +359.76
+15:25:47 INFO    TICK 584 · rank 1/3 · net_worth 159,491.43 · realized +1,023.72 · unrealized +358.90
+15:25:49 INFO    TICK 586 · rank 1/3 · net_worth 159,491.82 · realized +1,023.72 · unrealized +360.49
+15:25:51 INFO    TICK 588 · rank 1/3 · net_worth 159,486.21 · realized +1,023.72 · unrealized +359.52
+15:25:53 INFO    TICK 590 · rank 1/3 · net_worth 159,485.60 · realized +1,023.72 · unrealized +360.89
+15:25:55 INFO    TICK 592 · rank 1/3 · net_worth 159,483.19 · realized +1,023.72 · unrealized +356.91
+15:25:57 INFO    TICK 594 · rank 1/3 · net_worth 159,481.18 · realized +1,023.72 · unrealized +355.08
+15:25:59 INFO    TICK 596 · rank 1/3 · net_worth 159,481.17 · realized +1,023.72 · unrealized +356.04
+15:26:01 INFO    TICK 598 · rank 1/3 · net_worth 159,477.95 · realized +1,023.72 · unrealized +354.13
+15:26:03 INFO    TICK 600 · rank 1/3 · net_worth 159,482.94 · realized +1,023.72 · unrealized +360.31
+15:26:05 INFO    TICK 602 · rank 1/3 · net_worth 159,486.13 · realized +1,023.72 · unrealized +362.10
+15:26:07 INFO    TICK 604 · rank 1/3 · net_worth 159,486.52 · realized +1,023.72 · unrealized +359.18
+15:26:08 INFO    BOOKS · net_worth 159,486.52 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     225.43     +113.14
+    AMD        +20     164.77     178.70     +278.67
+    AMZN       +20     197.07     205.60     +170.52
+    GOOGL      +20     174.96     180.87     +118.16
+    INTC       +20      21.99      24.58      +51.81
+    META       +20     579.91     580.35       +8.76
+    MSFT       +20     414.44     418.54      +82.03
+    NFLX       +20     720.95     688.43     -650.28
+    NVDA       +20     130.23     133.23      +59.94
+    ORCA      +150      24.00      24.75     +112.19
+    TSLA       +20     279.61     280.32      +14.24
+    cash 97,414.82 · realized +1,023.72 · unrealized +359.17 · fees 78.46 · interest/carry/dividends +115.59
+15:26:09 INFO    TICK 606 · rank 1/3 · net_worth 159,486.91 · realized +1,023.72 · unrealized +359.55
+15:26:11 INFO    TICK 608 · rank 1/3 · net_worth 159,484.30 · realized +1,023.72 · unrealized +357.99
+15:26:13 INFO    TICK 610 · rank 1/3 · net_worth 159,484.49 · realized +1,023.72 · unrealized +359.96
+15:26:15 INFO    TICK 612 · rank 1/3 · net_worth 159,487.68 · realized +1,023.72 · unrealized +359.74
+15:26:17 INFO    TICK 614 · rank 1/3 · net_worth 159,487.87 · realized +1,023.72 · unrealized +360.85
+15:26:19 INFO    TICK 616 · rank 1/3 · net_worth 159,486.46 · realized +1,023.72 · unrealized +357.21
+15:26:21 INFO    TICK 618 · rank 1/3 · net_worth 159,478.65 · realized +1,023.72 · unrealized +351.22
+15:26:22 INFO    Session event: DIVIDEND — AAPL pays $0.25/share — longs credited, shorts debited, price marked down ex-dividend
+15:26:24 INFO    TICK 620 · rank 1/3 · net_worth 159,477.64 · realized +1,023.72 · unrealized +355.88
+15:26:26 INFO    TICK 622 · rank 1/3 · net_worth 159,495.83 · realized +1,023.72 · unrealized +376.56
+15:26:28 INFO    TICK 624 · rank 1/3 · net_worth 159,513.42 · realized +1,023.72 · unrealized +395.66
+15:26:30 INFO    TICK 626 · rank 1/3 · net_worth 159,532.61 · realized +1,023.72 · unrealized +412.43
+15:26:32 INFO    TICK 628 · rank 1/3 · net_worth 159,545.40 · realized +1,023.72 · unrealized +417.67
+15:26:34 INFO    TICK 630 · rank 1/3 · net_worth 159,546.99 · realized +1,023.72 · unrealized +420.75
+15:26:36 INFO    TICK 632 · rank 1/3 · net_worth 159,552.98 · realized +1,023.72 · unrealized +422.96
+15:26:38 INFO    TICK 634 · rank 1/3 · net_worth 159,559.97 · realized +1,023.72 · unrealized +429.09
+15:26:38 INFO    BOOKS · net_worth 159,559.97 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     229.62     +197.00
+    AMD        +20     164.77     178.04     +265.44
+    AMZN       +20     197.07     205.61     +170.73
+    GOOGL      +20     174.96     180.87     +118.16
+    INTC       +20      21.99      24.49      +50.03
+    META       +20     579.91     580.08       +3.33
+    MSFT       +20     414.44     418.59      +83.02
+    NFLX       +20     720.95     688.79     -643.04
+    NVDA       +20     130.23     133.25      +60.48
+    ORCA      +150      24.00      24.75     +111.75
+    TSLA       +20     279.61     280.22      +12.18
+    cash 97,425.67 · realized +1,023.72 · unrealized +429.09 · fees 78.46 · interest/carry/dividends +126.44
+15:26:40 INFO    TICK 636 · rank 1/3 · net_worth 159,565.36 · realized +1,023.72 · unrealized +435.64
+15:26:42 INFO    TICK 638 · rank 1/3 · net_worth 159,573.55 · realized +1,023.72 · unrealized +442.71
+15:26:44 INFO    TICK 640 · rank 1/3 · net_worth 159,573.94 · realized +1,023.72 · unrealized +443.39
+15:26:46 INFO    TICK 642 · rank 1/3 · net_worth 159,574.93 · realized +1,023.72 · unrealized +443.85
+15:26:48 INFO    TICK 644 · rank 1/3 · net_worth 159,575.52 · realized +1,023.72 · unrealized +441.79
+15:26:50 INFO    TICK 646 · rank 1/3 · net_worth 159,575.91 · realized +1,023.72 · unrealized +439.91
+15:26:52 INFO    TICK 648 · rank 1/3 · net_worth 159,573.50 · realized +1,023.72 · unrealized +440.24
+15:26:54 INFO    TICK 650 · rank 1/3 · net_worth 159,573.89 · realized +1,023.72 · unrealized +437.68
+15:26:56 INFO    TICK 652 · rank 1/3 · net_worth 159,574.28 · realized +1,023.72 · unrealized +441.53
+15:26:58 INFO    TICK 654 · rank 1/3 · net_worth 159,576.87 · realized +1,023.72 · unrealized +444.47
+15:27:00 INFO    TICK 656 · rank 1/3 · net_worth 159,577.66 · realized +1,023.72 · unrealized +445.20
+15:27:02 INFO    TICK 658 · rank 1/3 · net_worth 159,577.65 · realized +1,023.72 · unrealized +447.22
+15:27:04 INFO    TICK 660 · rank 1/3 · net_worth 159,593.24 · realized +1,023.72 · unrealized +465.64
+15:27:06 INFO    TICK 662 · rank 1/3 · net_worth 159,603.82 · realized +1,023.72 · unrealized +473.83
+15:27:08 INFO    TICK 664 · rank 1/3 · net_worth 159,604.21 · realized +1,023.72 · unrealized +474.78
+15:27:08 INFO    BOOKS · net_worth 159,604.21 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     229.80     +200.63
+    AMD        +20     164.77     178.14     +267.37
+    AMZN       +20     197.07     205.66     +171.84
+    GOOGL      +20     174.96     180.94     +119.63
+    INTC       +20      21.99      24.48      +49.95
+    META       +20     579.91     580.02       +2.22
+    MSFT       +20     414.44     418.60      +83.16
+    NFLX       +20     720.95     690.40     -610.85
+    NVDA       +20     130.23     133.35      +62.53
+    ORCA      +150      24.00      24.75     +112.01
+    TSLA       +20     279.61     280.36      +14.97
+    cash 97,431.51 · realized +1,023.72 · unrealized +473.45 · fees 78.46 · interest/carry/dividends +132.28
+15:27:10 INFO    TICK 666 · rank 1/3 · net_worth 159,613.00 · realized +1,023.72 · unrealized +481.57
+15:27:12 INFO    TICK 668 · rank 1/3 · net_worth 159,620.59 · realized +1,023.72 · unrealized +492.47
+15:27:14 INFO    TICK 670 · rank 1/3 · net_worth 159,628.78 · realized +1,023.72 · unrealized +500.09
+15:27:16 INFO    TICK 672 · rank 1/3 · net_worth 159,629.17 · realized +1,023.72 · unrealized +498.05
+15:27:18 INFO    TICK 674 · rank 1/3 · net_worth 159,630.36 · realized +1,023.72 · unrealized +497.41
+15:27:20 INFO    TICK 676 · rank 1/3 · net_worth 159,630.75 · realized +1,023.72 · unrealized +496.72
+15:27:22 INFO    TICK 678 · rank 1/3 · net_worth 159,631.74 · realized +1,023.72 · unrealized +496.20
+15:27:24 INFO    TICK 680 · rank 1/3 · net_worth 159,632.13 · realized +1,023.72 · unrealized +496.15
+15:27:26 INFO    TICK 682 · rank 1/3 · net_worth 159,632.52 · realized +1,023.72 · unrealized +497.51
+15:27:28 INFO    TICK 684 · rank 1/3 · net_worth 159,632.91 · realized +1,023.72 · unrealized +495.45
+15:27:30 INFO    TICK 686 · rank 1/3 · net_worth 159,633.10 · realized +1,023.72 · unrealized +495.02
+15:27:32 INFO    TICK 688 · rank 1/3 · net_worth 159,629.69 · realized +1,023.72 · unrealized +490.37
+15:27:34 INFO    TICK 690 · rank 1/3 · net_worth 159,629.88 · realized +1,023.72 · unrealized +492.40
+15:27:36 INFO    TICK 692 · rank 1/3 · net_worth 159,634.07 · realized +1,023.72 · unrealized +496.14
+15:27:38 INFO    TICK 694 · rank 1/3 · net_worth 159,634.46 · realized +1,023.72 · unrealized +495.61
+15:27:38 INFO    BOOKS · net_worth 159,634.46 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     229.87     +202.09
+    AMD        +20     164.77     178.15     +267.56
+    AMZN       +20     197.07     205.67     +172.00
+    GOOGL      +20     174.96     180.96     +120.05
+    INTC       +20      21.99      24.46      +49.43
+    META       +20     579.91     580.11       +3.95
+    MSFT       +20     414.44     418.33      +77.92
+    NFLX       +20     720.95     691.46     -589.71
+    NVDA       +20     130.23     133.25      +60.53
+    ORCA      +150      24.00      24.77     +114.94
+    TSLA       +20     279.61     280.38      +15.36
+    cash 97,437.36 · realized +1,023.72 · unrealized +494.13 · fees 78.46 · interest/carry/dividends +138.13
+15:27:40 INFO    TICK 696 · rank 1/3 · net_worth 159,640.45 · realized +1,023.72 · unrealized +501.28
+15:27:42 INFO    TICK 698 · rank 1/3 · net_worth 159,640.84 · realized +1,023.72 · unrealized +503.02
+15:27:43 INFO    Session event: CALENDAR — Upcoming: earnings GOOGL @ t800
+15:27:44 INFO    TICK 700 · rank 1/3 · net_worth 159,641.23 · realized +1,023.72 · unrealized +502.82
+15:27:46 INFO    TICK 702 · rank 1/3 · net_worth 159,637.02 · realized +1,023.72 · unrealized +499.24
+15:27:48 INFO    TICK 704 · rank 1/3 · net_worth 159,638.01 · realized +1,023.72 · unrealized +498.91
+15:27:50 INFO    TICK 706 · rank 1/3 · net_worth 159,638.40 · realized +1,023.72 · unrealized +498.07
+15:27:52 INFO    TICK 708 · rank 1/3 · net_worth 159,642.39 · realized +1,023.72 · unrealized +499.79
+15:27:54 INFO    TICK 710 · rank 1/3 · net_worth 159,642.78 · realized +1,023.72 · unrealized +502.55
+15:27:56 INFO    TICK 712 · rank 1/3 · net_worth 159,643.17 · realized +1,023.72 · unrealized +502.60
+15:27:58 INFO    TICK 714 · rank 1/3 · net_worth 159,642.56 · realized +1,023.72 · unrealized +500.07
+15:28:00 INFO    TICK 716 · rank 1/3 · net_worth 159,642.95 · realized +1,023.72 · unrealized +501.65
+15:28:02 INFO    TICK 718 · rank 1/3 · net_worth 159,643.34 · realized +1,023.72 · unrealized +504.24
+15:28:04 INFO    TICK 720 · rank 1/3 · net_worth 159,643.73 · realized +1,023.72 · unrealized +507.52
+15:28:06 INFO    TICK 722 · rank 1/3 · net_worth 159,652.52 · realized +1,023.72 · unrealized +513.46
+15:28:08 INFO    BOOKS · net_worth 159,652.52 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     229.94     +203.45
+    AMD        +20     164.77     178.29     +270.35
+    AMZN       +20     197.07     205.59     +170.36
+    GOOGL      +20     174.96     180.97     +120.16
+    INTC       +20      21.99      24.46      +49.51
+    META       +20     579.91     580.49      +11.70
+    MSFT       +20     414.44     417.95      +70.24
+    NFLX       +20     720.95     692.07     -577.47
+    NVDA       +20     130.23     133.26      +60.71
+    ORCA      +150      24.00      24.77     +115.49
+    TSLA       +20     279.61     280.52      +18.19
+    cash 97,442.82 · realized +1,023.72 · unrealized +512.68 · fees 78.46 · interest/carry/dividends +143.59
+15:28:08 INFO    TICK 724 · rank 1/3 · net_worth 159,652.91 · realized +1,023.72 · unrealized +511.75
+15:28:10 INFO    TICK 726 · rank 1/3 · net_worth 159,654.10 · realized +1,023.72 · unrealized +513.74
+15:28:12 INFO    TICK 728 · rank 1/3 · net_worth 159,656.29 · realized +1,023.72 · unrealized +516.56
+15:28:14 INFO    TICK 730 · rank 1/3 · net_worth 159,656.68 · realized +1,023.72 · unrealized +515.63
+15:28:16 INFO    TICK 732 · rank 1/3 · net_worth 159,657.07 · realized +1,023.72 · unrealized +516.05
+15:28:18 INFO    TICK 734 · rank 1/3 · net_worth 159,659.66 · realized +1,023.72 · unrealized +517.88
+15:28:20 INFO    TICK 736 · rank 1/3 · net_worth 159,666.05 · realized +1,023.72 · unrealized +521.18
+15:28:22 INFO    TICK 738 · rank 1/3 · net_worth 159,668.84 · realized +1,023.72 · unrealized +523.23
+15:28:24 INFO    TICK 740 · rank 1/3 · net_worth 159,669.23 · realized +1,023.72 · unrealized +523.94
+15:28:26 INFO    TICK 742 · rank 1/3 · net_worth 159,669.62 · realized +1,023.72 · unrealized +525.33
+15:28:28 INFO    TICK 744 · rank 1/3 · net_worth 159,665.40 · realized +1,023.72 · unrealized +523.60
+15:28:30 INFO    TICK 746 · rank 1/3 · net_worth 159,665.79 · realized +1,023.72 · unrealized +526.25
+15:28:32 INFO    TICK 748 · rank 1/3 · net_worth 159,666.18 · realized +1,023.72 · unrealized +527.60
+15:28:34 INFO    TICK 750 · rank 1/3 · net_worth 159,674.57 · realized +1,023.72 · unrealized +538.75
+15:28:36 INFO    TICK 752 · rank 1/3 · net_worth 159,684.56 · realized +1,023.72 · unrealized +545.42
+15:28:38 INFO    BOOKS · net_worth 159,684.56 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     230.22     +209.07
+    AMD        +20     164.77     178.35     +271.67
+    AMZN       +20     197.07     205.51     +168.70
+    GOOGL      +20     174.96     180.97     +120.23
+    INTC       +20      21.99      24.46      +49.45
+    META       +20     579.91     580.77      +17.25
+    MSFT       +20     414.44     417.89      +68.94
+    NFLX       +20     720.95     693.41     -550.64
+    NVDA       +20     130.23     133.33      +62.09
+    ORCA      +150      24.00      24.76     +114.30
+    TSLA       +20     279.61     280.63      +20.48
+    cash 97,448.66 · realized +1,023.72 · unrealized +551.52 · fees 78.46 · interest/carry/dividends +149.43
+15:28:38 INFO    TICK 754 · rank 1/3 · net_worth 159,692.55 · realized +1,023.72 · unrealized +549.96
+15:28:40 INFO    TICK 756 · rank 1/3 · net_worth 159,690.54 · realized +1,023.72 · unrealized +549.00
+15:28:42 INFO    TICK 758 · rank 1/3 · net_worth 159,700.33 · realized +1,023.72 · unrealized +554.47
+15:28:44 INFO    TICK 760 · rank 1/3 · net_worth 159,700.72 · realized +1,023.72 · unrealized +552.24
+15:28:46 INFO    TICK 762 · rank 1/3 · net_worth 159,701.11 · realized +1,023.72 · unrealized +552.18
+15:28:48 INFO    TICK 764 · rank 1/3 · net_worth 159,702.90 · realized +1,023.72 · unrealized +552.24
+15:28:50 INFO    TICK 766 · rank 1/3 · net_worth 159,707.09 · realized +1,023.72 · unrealized +554.22
+15:28:52 INFO    TICK 768 · rank 1/3 · net_worth 159,705.48 · realized +1,023.72 · unrealized +552.09
+15:28:54 INFO    TICK 770 · rank 1/3 · net_worth 159,705.87 · realized +1,023.72 · unrealized +553.72
+15:28:56 INFO    TICK 772 · rank 1/3 · net_worth 159,706.26 · realized +1,023.72 · unrealized +552.72
+15:28:58 INFO    TICK 774 · rank 1/3 · net_worth 159,701.25 · realized +1,023.72 · unrealized +549.52
+15:29:00 INFO    TICK 776 · rank 1/3 · net_worth 159,701.64 · realized +1,023.72 · unrealized +548.13
+15:29:02 INFO    TICK 778 · rank 1/3 · net_worth 159,702.03 · realized +1,023.72 · unrealized +548.64
+15:29:04 INFO    TICK 780 · rank 1/3 · net_worth 159,702.42 · realized +1,023.72 · unrealized +548.89
+15:29:06 INFO    TICK 782 · rank 1/3 · net_worth 159,700.51 · realized +1,023.72 · unrealized +550.35
+15:29:08 INFO    BOOKS · net_worth 159,700.51 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     230.22     +208.94
+    AMD        +20     164.77     178.40     +272.71
+    AMZN       +20     197.07     205.17     +161.91
+    GOOGL      +20     174.96     181.04     +121.60
+    INTC       +20      21.99      24.46      +49.42
+    META       +20     579.91     580.90      +19.85
+    MSFT       +20     414.44     417.72      +65.60
+    NFLX       +20     720.95     693.75     -544.00
+    NVDA       +20     130.23     133.25      +60.53
+    ORCA      +150      24.00      24.76     +113.72
+    TSLA       +20     279.61     280.62      +20.16
+    cash 97,454.51 · realized +1,023.72 · unrealized +550.44 · fees 78.46 · interest/carry/dividends +155.28
+15:29:08 INFO    TICK 784 · rank 1/3 · net_worth 159,700.90 · realized +1,023.72 · unrealized +550.44
+15:29:10 INFO    TICK 786 · rank 1/3 · net_worth 159,701.29 · realized +1,023.72 · unrealized +550.44
+15:29:12 INFO    TICK 788 · rank 1/3 · net_worth 159,705.68 · realized +1,023.72 · unrealized +551.07
+15:29:14 INFO    TICK 790 · rank 1/3 · net_worth 159,706.07 · realized +1,023.72 · unrealized +552.97
+15:29:16 INFO    TICK 792 · rank 1/3 · net_worth 159,706.46 · realized +1,023.72 · unrealized +554.75
+15:29:18 INFO    TICK 794 · rank 1/3 · net_worth 159,707.25 · realized +1,023.72 · unrealized +553.28
+15:29:20 INFO    TICK 796 · rank 1/3 · net_worth 159,709.24 · realized +1,023.72 · unrealized +552.26
+15:29:22 INFO    TICK 798 · rank 1/3 · net_worth 159,720.03 · realized +1,023.72 · unrealized +558.01
+15:29:24 INFO    TICK 800 · rank 1/3 · net_worth 159,723.42 · realized +1,023.72 · unrealized +564.59
+15:29:26 INFO    TICK 802 · rank 1/3 · net_worth 159,730.41 · realized +1,023.72 · unrealized +570.84
+15:29:28 INFO    TICK 804 · rank 1/3 · net_worth 159,735.60 · realized +1,023.72 · unrealized +575.46
+15:29:30 INFO    TICK 806 · rank 1/3 · net_worth 159,739.39 · realized +1,023.72 · unrealized +577.89
+15:29:32 INFO    TICK 808 · rank 1/3 · net_worth 159,739.78 · realized +1,023.72 · unrealized +578.42
+15:29:34 INFO    TICK 810 · rank 1/3 · net_worth 159,734.97 · realized +1,023.72 · unrealized +578.93
+15:29:36 INFO    TICK 812 · rank 1/3 · net_worth 159,737.76 · realized +1,023.72 · unrealized +583.49
+15:29:38 INFO    BOOKS · net_worth 159,737.76 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     230.30     +210.66
+    AMD        +20     164.77     178.34     +271.40
+    AMZN       +20     197.07     205.13     +161.18
+    GOOGL      +20     174.96     181.00     +120.84
+    INTC       +20      21.99      24.45      +49.31
+    META       +20     579.91     581.10      +23.84
+    MSFT       +20     414.44     417.63      +63.90
+    NFLX       +20     720.95     693.88     -541.25
+    NVDA       +20     130.23     133.20      +59.50
+    ORCA      +150      24.00      24.76     +113.85
+    TSLA       +20     279.61     282.09      +49.57
+    cash 97,460.36 · realized +1,023.72 · unrealized +582.80 · fees 78.46 · interest/carry/dividends +161.13
+15:29:38 INFO    TICK 814 · rank 1/3 · net_worth 159,738.15 · realized +1,023.72 · unrealized +582.86
+15:29:40 INFO    TICK 816 · rank 1/3 · net_worth 159,744.54 · realized +1,023.72 · unrealized +582.50
+15:29:42 INFO    TICK 818 · rank 1/3 · net_worth 159,746.73 · realized +1,023.72 · unrealized +585.79
+15:29:43 INFO    Session event: CALENDAR_EVENT — Earnings: GOOGL moving -7.4%
+15:29:43 INFO    Order sent: sell 20 GOOGL @ 175.33 (IOC)
+15:29:43 INFO    ACK 5aa86f67 sell 20 GOOGL @ 175.33
+15:29:43 INFO    FILL sell 3 GOOGL @ 181.96 (fee 0.82) → GOOGL +17 @ 174.96 (mark 181.01, unrealized +102.77) · cash 98,006.59 · realized +1,044.72 · unrealized +567.98 · fees 79.28 · interest/carry/dividends +162.30
+15:29:43 INFO    FILL sell 17 GOOGL @ 181.81 (fee 4.64) → GOOGL flat · cash 101,092.73 · realized +1,161.15 · unrealized +465.22 · fees 83.91 · interest/carry/dividends +162.30
+15:29:44 INFO    TICK 820 · rank 1/3 · net_worth 159,739.12 · realized +1,161.16 · unrealized +465.11
+15:29:46 INFO    TICK 822 · rank 1/3 · net_worth 159,739.52 · realized +1,161.16 · unrealized +467.56
+15:29:48 INFO    TICK 824 · rank 1/3 · net_worth 159,749.93 · realized +1,161.16 · unrealized +475.51
+15:29:50 INFO    TICK 826 · rank 1/3 · net_worth 159,753.33 · realized +1,161.16 · unrealized +479.94
+15:29:52 INFO    TICK 828 · rank 1/3 · net_worth 159,753.94 · realized +1,161.16 · unrealized +480.73
+15:29:54 INFO    TICK 830 · rank 1/3 · net_worth 159,761.54 · realized +1,161.16 · unrealized +487.27
+15:29:56 INFO    TICK 832 · rank 1/3 · net_worth 159,761.95 · realized +1,161.16 · unrealized +487.66
+15:29:57 INFO    Session event: SSR_ON — GOOGL is now under the short-sale rule — shorts must add liquidity above the bid
+15:29:58 INFO    Order sent: buy 60 GOOGL @ 168.55 (IOC)
+15:29:58 INFO    ACK 71b91ed7 buy 60 GOOGL @ 168.55
+15:29:58 INFO    FILL buy 10 GOOGL @ 164.83 (fee 2.47) → GOOGL +10 @ 164.83 (mark 163.48, unrealized -13.53) · cash 99,444.78 · realized +1,161.15 · unrealized +474.38 · fees 86.39 · interest/carry/dividends +165.13
+15:29:58 INFO    FILL buy 20 GOOGL @ 164.98 (fee 4.95) → GOOGL +30 @ 164.93 (mark 164.06, unrealized -26.12) · cash 96,140.23 · realized +1,161.15 · unrealized +461.79 · fees 91.34 · interest/carry/dividends +165.13
+15:29:58 INFO    FILL buy 30 GOOGL @ 165.14 (fee 7.43) → GOOGL +60 @ 165.03 (mark 164.07, unrealized -58.19) · cash 91,178.60 · realized +1,161.15 · unrealized +429.71 · fees 98.77 · interest/carry/dividends +165.13
+15:29:58 INFO    TICK 834 · rank 1/3 · net_worth 159,715.80 · realized +1,161.16 · unrealized +427.32
+15:29:58 INFO    Order sent: buy 60 GOOGL @ 168.55 (IOC)
+15:29:58 INFO    ACK b1f52db8 buy 60 GOOGL @ 168.55
+15:29:58 INFO    FILL buy 10 GOOGL @ 165.43 (fee 2.48) → GOOGL +70 @ 165.09 (mark 164.07, unrealized -71.35) · cash 89,522.22 · realized +1,161.15 · unrealized +413.74 · fees 101.25 · interest/carry/dividends +165.53
+15:29:58 INFO    FILL buy 20 GOOGL @ 165.58 (fee 4.97) → GOOGL +90 @ 165.20 (mark 164.08, unrealized -101.14) · cash 86,205.65 · realized +1,161.15 · unrealized +383.95 · fees 106.22 · interest/carry/dividends +165.53
+15:29:58 INFO    FILL buy 30 GOOGL @ 165.73 (fee 7.46) → GOOGL +120 @ 165.33 (mark 164.08, unrealized -150.06) · cash 81,226.29 · realized +1,161.15 · unrealized +335.03 · fees 113.67 · interest/carry/dividends +165.53
+15:29:59 INFO    Order sent: buy 50 GOOGL @ 168.55 (IOC)
+15:29:59 INFO    ACK 97bd94d1 buy 50 GOOGL @ 168.55
+15:29:59 INFO    FILL buy 10 GOOGL @ 165.44 (fee 2.48) → GOOGL +130 @ 165.34 (mark 164.09, unrealized -162.72) · cash 79,569.41 · realized +1,161.15 · unrealized +322.37 · fees 116.16 · interest/carry/dividends +165.53
+15:29:59 INFO    FILL buy 20 GOOGL @ 165.59 (fee 4.97) → GOOGL +150 @ 165.37 (mark 164.66, unrealized -107.31) · cash 76,252.64 · realized +1,161.15 · unrealized +377.78 · fees 121.12 · interest/carry/dividends +165.53
+15:29:59 INFO    FILL buy 20 GOOGL @ 165.74 (fee 4.97) → GOOGL +170 @ 165.42 (mark 164.66, unrealized -127.96) · cash 72,932.87 · realized +1,161.15 · unrealized +357.12 · fees 126.10 · interest/carry/dividends +165.53
+15:30:00 INFO    TICK 836 · rank 1/3 · net_worth 159,772.48 · realized +1,161.16 · unrealized +458.86
+15:30:00 INFO    BOOKS at close · net_worth 159,772.48 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     230.39     +212.33
+    AMD        +20     164.77     178.33     +271.29
+    AMZN       +20     197.07     205.14     +161.34
+    GOOGL     +170     165.42     164.67     -127.20
+    INTC       +20      21.99      24.42      +48.75
+    META       +20     579.91     581.37      +29.30
+    MSFT       +20     414.44     417.60      +63.25
+    NFLX       +20     720.95     694.31     -532.69
+    NVDA       +20     130.23     133.28      +60.94
+    ORCA      +150      24.00      24.77     +115.38
+    TSLA       +20     279.61     282.58      +59.47
+    cash 72,933.18 · realized +1,161.15 · unrealized +362.15 · fees 126.10 · interest/carry/dividends +165.84
+15:30:00 INFO    SESSION SUMMARY connects=2 rejects=0
+15:30:00 INFO    Session event: SESSION_CLOSED — Trading session is now CLOSED. Flatten positions.
+15:30:00 INFO    TICK 836 · rank 1/3 · net_worth 159,772.48 · realized +1,161.16 · unrealized +458.86
+15:30:00 INFO    RECONCILE at close vs leaderboard — OK: positions, entries, cash, fees and realized P&L match the exchange (non-trade cash flows +165.84)
+15:30:02 INFO    TICK 838 · rank 1/3 · net_worth 159,348.99 · realized +1,161.16 · unrealized +525.95
+15:30:04 INFO    TICK 840 · rank 1/3 · net_worth 159,339.91 · realized +1,161.16 · unrealized +501.07
+15:30:06 INFO    TICK 842 · rank 1/3 · net_worth 159,331.08 · realized +1,161.16 · unrealized +479.87
+15:30:08 INFO    BOOKS · net_worth 159,331.08 · matches exchange
+    SYMBOL     QTY      ENTRY       MARK      UNREAL
+    AAPL       +20     219.77     229.00     +184.69
+    AMD        +20     164.77     178.38     +272.31
+    AMZN       +20     197.07     204.54     +149.29
+    GOOGL     +170     165.42     165.79      +63.47
+    INTC       +20      21.99      24.42      +48.78
+    META       +20     579.91     581.24      +26.61
+    MSFT       +20     414.44     416.02      +31.57
+    NFLX       +20     720.95     694.38     -531.40
+    NVDA       +20     130.23     133.32      +61.76
+    ORCA      +150      24.00      24.76     +114.74
+    TSLA       +20     279.61     281.82      +44.22
+    cash 72,933.18 · realized +1,161.15 · unrealized +466.03 · fees 126.10 · interest/carry/dividends +165.84
+15:30:08 INFO    TICK 844 · rank 1/3 · net_worth 159,323.17 · realized +1,161.16 · unrealized +453.83
