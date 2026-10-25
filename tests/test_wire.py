@@ -35,6 +35,7 @@ def _bot(tmp_path, ws: _FakeWS) -> _Bot:
     bot = _Bot(MyTrader())
     bot._state_path = tmp_path / "state.json"
     bot._ws = ws
+    bot._session_open = True
     return bot
 
 

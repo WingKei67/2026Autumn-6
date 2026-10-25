@@ -181,6 +181,11 @@ class MyTrader(ShockSwitchTrader):
 
     def on_tick(self, market, portfolio):
         """Called every tick. Return at most one Signal, or None to sit out."""
+        bot = getattr(self, "_bot", None)
+        if bot is not None and (
+            bot._resync or bot._first_book or bot._entry_from_board
+        ):
+            return None
         now = self.now()
         # 1. Forget orders in flight for longer than INFLIGHT_TTL_S: the IOC's unfilled rest is long cancelled
         self._inflight = {s: f for s, f in self._inflight.items() if now - f[2] < INFLIGHT_TTL_S}
@@ -309,6 +314,7 @@ class _Bot(_AdaptedTraderBot):
     def __init__(self, owner: MyTrader) -> None:
         super().__init__(owner)
         owner._portfolio = self.portfolio   # lets on_ipo read cash and positions
+        owner._bot = self
         self._state_path = STATE_DIR / f"{_config.TEAM_ID}.json"
         self.ledger = Ledger.load(self._state_path)
         self.rejects = 0
@@ -469,7 +475,9 @@ class _Bot(_AdaptedTraderBot):
                 logging.info("GRANT starting shares (no trade print): %s",
                              ", ".join(f"+{d} {s}" for s, d in sorted(moved.items())))
         if self._closing:
-            self._reconcile_close("PortfolioUpdate", state)
+            logging.info(
+                "Close reconciliation awaits a leaderboard with entry prices"
+            )
 
     def _on_leaderboard(self, msg: Leaderboard) -> None:
         """Keep our own leaderboard row: cash, positions, avg_cost, realized P&L, fees.
@@ -489,6 +497,24 @@ class _Bot(_AdaptedTraderBot):
         else:
             return
         self._last_row = row
+        self.portfolio.apply_server_update(PortfolioUpdate(
+            team_id=_config.TEAM_ID,
+            cash=float(row["cash"]),
+            positions=dict(row["positions"]),
+            realized_pnl=float(row.get("realized_pnl", 0.0)),
+            unrealized_pnl=float(row.get("unrealized_pnl", 0.0)),
+            total_fees_paid=float(row.get("total_fees_paid", 0.0)),
+            total_rebates_earned=float(row.get("total_rebates_earned", 0.0)),
+            net_worth=float(row.get("net_worth", self.portfolio._net_worth)),
+            **{
+                name: row[name]
+                for name in (
+                    "total_carry_paid", "liquidated", "gross_exposure",
+                    "leverage", "margin_ratio", "borrowed", "max_leverage"
+                )
+                if name in row
+            },
+        ))
         logging.info("TICK %d · rank %d/%d · net_worth %s · realized %s · unrealized %s",
                      msg.tick, rank, len(board), f"{row.get('net_worth', 0.0):,.2f}",
                      f"{row.get('realized_pnl', 0.0):+,.2f}", f"{row.get('unrealized_pnl', 0.0):+,.2f}")
@@ -498,7 +524,17 @@ class _Bot(_AdaptedTraderBot):
             return
         # Grants / IPO allocations: the exchange's own book cost replaces our mark
         for sym in list(self._entry_from_board):
-            if state["avg_cost"].get(sym):
+            if (
+                not self.ledger.positions.get(sym)
+                and not state["positions"].get(sym)
+            ):
+                self._entry_from_board.discard(sym)
+
+            elif (
+                state["avg_cost"].get(sym) is not None
+                and self.ledger.positions.get(sym)
+                == state["positions"].get(sym)
+            ):
                 self.ledger.avg_entry[sym] = state["avg_cost"][sym]
                 self._entry_from_board.discard(sym)
         # Interest on idle cash and margin carry accrue every tick with no message:
@@ -529,8 +565,15 @@ class _Bot(_AdaptedTraderBot):
 
     def _sync(self, source: str, state: dict) -> None:
         """Adopt the exchange's books after a (re)connect and log what differed."""
-        self._resync = False
         diffs = self.ledger.sync_from(marks=self._owner._refs, **state)
+
+        entries = state.get("avg_cost") or {}
+        self._entry_from_board.update(
+            set(self.ledger.positions) - set(entries)
+        )
+        self._entry_from_board.difference_update(entries)
+
+        self._resync = False
         if diffs:
             logging.info("RESYNC from %s — adopted %d difference(s):\n%s", source, len(diffs),
                          "\n".join(f"    {d}" for d in diffs))
@@ -539,16 +582,69 @@ class _Bot(_AdaptedTraderBot):
         self._log_books()
 
     def _reconcile_close(self, source: str, state: dict) -> None:
-        """Compare our books with the exchange's after the close. A mismatch is a bug."""
-        self._closing = False
+        """Check accounting and P&L at the leaderboard's valuation marks."""
+        row = self._last_row or {}
         diffs = self.ledger.reconcile(**state)
+
+        marks = {}
+        missing = set()
+        by_symbol = row.get("unrealized_by_sym") or {}
+
+        for sym, qty in state["positions"].items():
+            if not qty:
+                continue
+
+            if (
+                sym not in state.get("avg_cost", {})
+                or sym not in by_symbol
+            ):
+                missing.add(sym)
+                continue
+
+            # Recover the venue's mark from its per-symbol valuation:
+            # unrealized = (mark - average_cost) * quantity.
+            marks[sym] = (
+                state["avg_cost"][sym]
+                + float(by_symbol[sym]) / qty
+            )
+
+        missing.update(set(self.ledger.positions) - set(marks))
+        expected = row.get("unrealized_pnl")
+
+        if expected is None:
+            missing.add("unrealized_pnl")
+
+        if missing:
+            logging.warning(
+                "RECONCILE at close — INCOMPLETE valuation data: %s; "
+                "accounting differences: %s",
+                sorted(missing), diffs,
+            )
+            self.ledger.save(self._state_path)
+            return
+
+        self._closing = False
+        actual = self.ledger.unrealized_pnl(marks)
+
+        if abs(actual - float(expected)) > 1.0:
+            diffs.append(
+                f"unrealized: ours {actual:+.2f} "
+                f"vs exchange {expected:+.2f}"
+            )
+
         if diffs:
-            logging.warning("RECONCILE at close vs %s — %d MISMATCH(ES):\n%s", source, len(diffs),
-                            "\n".join(f"    {d}" for d in diffs))
+            logging.warning(
+                "RECONCILE at close vs %s — MISMATCH: %s",
+                source, diffs,
+            )
         else:
-            logging.info("RECONCILE at close vs %s — OK: positions, entries, cash, fees and "
-                         "realized P&L match the exchange (non-trade cash flows %+.2f)",
-                         source, self.ledger.accruals)
+            logging.info(
+                "RECONCILE at close vs %s — OK: accounting and "
+                "unrealized P&L match at venue valuation marks "
+                "(ours %+.2f, exchange %+.2f)",
+                source, actual, expected,
+            )
+
         self.ledger.save(self._state_path)
 
     def _check(self) -> str:
@@ -589,15 +685,48 @@ class _Bot(_AdaptedTraderBot):
     # ── Orders and session events ─────────────────────────────────────────
 
     async def _place_order(self, signal: Signal) -> None:
-        """Send the order as IOC (the stock plumbing sends a resting limit order)."""
-        if self.auction:
-            return              # auctions accept limit orders only; an IOC would be rejected
+        """Apply final position guards, then send a typed IOC order."""
+        if (
+            self.auction
+            or not self._session_open
+            or self._resync
+            or self._first_book
+            or self._entry_from_board
+        ):
+            return
+
+        if signal.symbol in self._owner._inflight:
+            return
+
+        pos = self.portfolio.positions.get(signal.symbol, 0)
+
+        if signal.side == "buy":
+            qty = min(
+                signal.quantity,
+                max(0, SEAT_POSITION_CAP - pos),
+            )
+        else:
+            # This strategy sells existing long inventory.
+            qty = min(signal.quantity, max(0, pos))
+
+        if qty <= 0:
+            return
+
+        signal = signal.model_copy(update={"quantity": qty})
         self._owner.on_sent(signal)
-        logging.info("Order sent: %s %d %s @ %.2f (IOC)",
-                     signal.side, signal.quantity, signal.symbol, signal.price)
+
+        logging.info(
+            "Order sent: %s %d %s @ %.2f (IOC)",
+            signal.side, qty, signal.symbol, signal.price,
+        )
+
         await self._send(PlaceOrder(
-            team_id=_config.TEAM_ID, symbol=signal.symbol, side=signal.side,
-            order_type="ioc", price=signal.price, quantity=signal.quantity,
+            team_id=_config.TEAM_ID,
+            symbol=signal.symbol,
+            side=signal.side,
+            order_type="ioc",
+            price=signal.price,
+            quantity=qty,
         ))
 
     async def _on_session_event(self, msg) -> None:

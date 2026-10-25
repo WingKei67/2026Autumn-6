@@ -67,4 +67,6 @@ def test_books_resync_from_leaderboard_row(monkeypatch, tmp_path):
     bot = asyncio.run(scenario())
     assert bot.ledger.positions == {"NVDA": 40}
     assert bot.ledger.avg_entry == {"NVDA": 162.43}
-    assert bot.ledger.cash == 210_000.0 and bot.ledger.realized_pnl == -4_109.98
+    assert bot.ledger.cash == 210_000.0
+    assert bot.ledger.realized_pnl == -4_109.98
+    assert bot.portfolio._net_worth == 216_500.0
