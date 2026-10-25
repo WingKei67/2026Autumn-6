@@ -35,7 +35,7 @@ The bot is an `arena.Trader` subclass. It trades scheduled events (earnings, mac
 - **Why participate.** Listing value is `offer × exp(N(+12%, 18%))`. That is an expected pop of `exp(0.12 + 0.18²/2) − 1 ≈ +14.6%`, with `P(break issue) = Φ(−0.12/0.18) ≈ 25%`. The edge is positive.
 - **Why the top of the range.** The pop is measured from the offer price, wherever the book prices it. Bidding below the top does not improve the pop. It only risks being left out of a hot deal.
 - **Why 150 shares, not more.** Allocation is pro rata, so bidding more than we want gets us more shares when the book is cold, which is exactly the case that breaks issue. We bid the size we actually want to hold, the seat's 150-share cap (inside the team's 800 limit). That is $4,200, or 2.8% of the seat's capital. A −2σ listing (−21%) costs about $900, 0.6% of capital.
-- **What happened (Session 4, live).** The deal priced at the top, **$28.00**, which means it was oversubscribed. Pro rata cut us back to **111 of 150 shares (74%)**, booked at an entry of exactly $28.00. On 10/24 our row showed ORCA marked at $29.45, **+5.2%** (`evidence/live_arena_reconnect.log`).
+- **What happened (Session 4, live).** The deal priced at the top, **$28.00**: 5,917 shares were subscribed for 4,000 offered. Only indications at or above the offer price share the allocation (`exchange/ipo.py`). Pro rata cut us back to **111 of 150 shares (74%)**, booked at exactly $28.00. 111/150 implies roughly 5,400 shares bid at $28, so about 500 shares bid below the top got nothing. That is the risk we avoided by bidding the top of the range. On listing day ORCA opened at $28.00, reached +2.9% by t+610, broke issue at −1.1% after the macro print (t+1204), and closed at +0.5%. By 10/24 it was marked at $29.45 (+5.2%, `evidence/live_arena_reconnect.log`).
 - **Rehearsal (local, same week-4 scenario).** The deal was undersubscribed: it priced at the bottom, $24.00, and we got the full 150 shares. ORCA closed at $24.77 (+3.2%). The rehearsal log shows each step: `on_ipo` → `IPO_SUB_RESULT` → `IPO ALLOCATED` → listing.
 
 ## 5. Evidence
@@ -48,12 +48,17 @@ The NVDA event shows the FADE logic at work: the bot sold 8 NVDA at $168.72 at t
 
 ### Session 4 (Fri Oct 23)
 
-The Session 4 recording has not been published yet, so the replay check is pending. What we can show now:
+`scripts/phase1_evidence.py` on the recording (`evidence/session4_replay.txt`). Events: AMZN earnings −7.9% (t+350), ORCA bookbuild t+150–450 / listing t+550, AAPL dividend (t+600), GOOGL earnings −5.7% (t+800), econ print −2.5% (t+1150). `6_rings_trader_2`:
 
-- **The ORCA bid:** our seat holds ORCA 111 @ $28.00. That is an allocation at the offer price, and there was no ORCA trade before it, so `on_ipo` submitted a bid in the bookbuild.
-- **Orders after the opening cross:** the local rehearsal of the same week-4 scenario shows the behaviour. The bot sends nothing during the 12-tick pre-open, because the auction gate is on, and its first order comes after the cross, at the AMZN event.
+| Check | Result |
+|---|---|
+| Bid in the ORCA bookbuild | ✅ Allocated 111 ORCA at the $28.00 offer, so `on_ipo` indicated in the book |
+| Orders after the opening cross | ✅ Every fill comes after `AUCTION_RESULT` (first at t+812); nothing is sent during the pre-open (auction gate) |
+| GOOGL −5.7% | ✅ Bought 52 @ 163.87 near the trough (t+812–817), sold 52 @ 171.31 on the rebound (t+874): about +$387 before fees |
+| Econ print −2.5% (FADE) | ✅ Sold MSFT, NVDA, NFLX and INTC in the event tick (t+1150–1155), bought them back 1.4–2.4% lower 23 ticks later (e.g. NVDA 60 @ 112.56 → 110.63) |
+| AMZN −7.9% | ⚠️ No fill of ours appears within 60 ticks |
 
-The live check will be added from the REPLAY tab once the recording is posted.
+The course again posted a market-only export. It has no acks, rejects or connects, and its trades are a sample (55,251 venue-wide). So the reject count cannot be measured from it. For AMZN it cannot show whether orders were sent and missed, filled but not sampled, or never sent; the bot's rule would have traded it (designed edge 6.3% against 0.6% round-trip fees). The full local rehearsal below covers what this export cannot: 10 orders → 10 ACKs, 0 rejects.
 
 ### Full-session log — local rehearsal of the week-4 scenario (`evidence/local_week4_rehearsal.log`)
 
