@@ -19,30 +19,30 @@ Session: AUCTION_INDICATIVE — Opening cross in 3 ticks
 Session: AUCTION_INDICATIVE — Opening cross in 2 ticks
 Session: AUCTION_INDICATIVE — Opening cross in 1 ticks
 Session: CALENDAR — 4 scheduled event(s) this session
-Session: IPO_ANNOUNCE — IPO: Orca Analytics (ORCA) — 4,000 shares at $24.00–28.00; book opens 
+Session: IPO_ANNOUNCE — IPO: Orca Analytics (ORCA) — 4,000 shares at $24.00–28.00; book opens
 t150, lists t550
 ▶  Session open — trading begins
 Session: AUCTION_RESULT — Opening auction complete — continuous trading begins
 Session: FEE_SCHEDULE — Venue fee schedule: taker 15.0 bps, maker rebate 10.0 bps
 ▶  Session open — trading begins
 Session: IPO_ANNOUNCE — IPO: Orca Analytics (ORCA) — book opens t150, lists t550
-Session: IPO_OPEN — ORCA book is OPEN — subscribe with quantity and max price ($24.00–28.00) 
+Session: IPO_OPEN — ORCA book is OPEN — subscribe with quantity and max price ($24.00–28.00)
 before t450
 Session: IPO_SUB_RESULT — indication recorded: 150 ORCA up to $28.00
 Session: CALENDAR — Upcoming: earnings AMZN @ t350
 Session: CALENDAR_EVENT — Earnings: AMZN moving -6.6%
-Session: SSR_ON — AMZN is now under the short-sale rule — shorts must add liquidity above the 
+Session: SSR_ON — AMZN is now under the short-sale rule — shorts must add liquidity above the
 bid
-Session: IPO_PRICED — ORCA priced at $24.00 — 150 shares subscribed for 4,000 offered; lists 
+Session: IPO_PRICED — ORCA priced at $24.00 — 150 shares subscribed for 4,000 offered; lists
 t550
 Session: CALENDAR — Upcoming: dividend AAPL @ t600
-Session: IPO_LISTED — ORCA is now trading — offered at $24.00. Where it belongs is yours to 
+Session: IPO_LISTED — ORCA is now trading — offered at $24.00. Where it belongs is yours to
 discover.
-Session: DIVIDEND — AAPL pays $0.25/share — longs credited, shorts debited, price marked down 
+Session: DIVIDEND — AAPL pays $0.25/share — longs credited, shorts debited, price marked down
 ex-dividend
 Session: CALENDAR — Upcoming: earnings GOOGL @ t800
 Session: CALENDAR_EVENT — Earnings: GOOGL moving -6.2%
-Session: SSR_ON — GOOGL is now under the short-sale rule — shorts must add liquidity above the 
+Session: SSR_ON — GOOGL is now under the short-sale rule — shorts must add liquidity above the
 bid
 Session: CALENDAR — Upcoming: econ_print MARKET @ t1150
 Session: CALENDAR_EVENT — Econ Print: market-wide moving -1.0%
