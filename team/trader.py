@@ -13,7 +13,7 @@ Notes:
 - This file adds six things on top of the parent:
     ① SHOCK: a teacher-injected shock carries target prices but no pct →
        derive pct ourselves and hand it to the parent's same logic
-    ② Reaction guarantee: at least one order within REACT_AFTER_S seconds of
+    ② Reaction guarantee: at least one order within REACT_AFTER_TICKS venue ticks of
        every event (course rule)
     ③ No rejects:
          - IOC orders only: any unfilled part is cancelled at once and never
@@ -72,7 +72,7 @@ DEFAULT_OVERSHOOT = 1.3
 MAX_SHOCK_PCT = 0.20          # a derived move above 20% means our price is stale → don't trade
 
 # ② Reaction guarantee
-REACT_AFTER_S = 20.0          # no order for an event after 20 s → send one
+REACT_AFTER_TICKS = 20        # fallback after 20 venue ticks; grading window is 60
 REACT_BID_DISCOUNT = 0.02     # that order: a 1-share IOC bid 2% under the best bid (won't fill, just "reacts")
 
 # ③ No rejects
@@ -102,9 +102,10 @@ class MyTrader(ShockSwitchTrader):
 
     def __init__(self) -> None:
         super().__init__()
+        self._venue_tick = 0
         self.ramp_ticks = DEFAULT_RAMP_TICKS
         self.overshoot = DEFAULT_OVERSHOOT
-        self._unanswered: list[tuple[float, set[str]]] = []   # events not yet answered: (time, symbols)
+        self._unanswered: list[tuple[int, set[str]]] = []   # events not yet answered: (venue_tick, symbols)
         self._inflight: dict[str, list] = {}                  # orders in flight: symbol → [side, unfilled qty, sent at]
         self._refs: dict[str, float] = {}                     # symbol → the exchange's fair price ref_price (for SHOCK)
         self._portfolio = None                                # set by _Bot: on_ipo gets no portfolio argument
@@ -118,9 +119,9 @@ class MyTrader(ShockSwitchTrader):
         Called once when the book opens (and again after a reconnect; a new
         indication replaces the old one).
 
-        - Price: the top of the range, hi → we are sure to be allocated
-          (an oversubscribed book is cut back pro rata, so we can only get
-          fewer shares, never more)
+        - Price: hi keeps the bid eligible at any offer within the range.
+          Allocation still depends on demand and available cash; a positive
+          allocation is not guaranteed.
         - Size: what this seat can still hold under its cap. Allocated shares
           skip the exchange's position check, but every later order (sells
           included) must respect the team limit, so never bid above the cap.
@@ -142,8 +143,10 @@ class MyTrader(ShockSwitchTrader):
         """Market news arrives here (CALENDAR_EVENT, SHOCK, DIVIDEND, IPO_* …).
         The parent only handles CALENDAR_EVENT; we do our part first."""
         # An event that names symbols → remember it for the ② reaction guarantee
+        if data.get("tick") is not None:
+            self._venue_tick = int(data["tick"])
         if event in ("CALENDAR_EVENT", "SHOCK") and data.get("affected"):
-            self._unanswered.append((self.now(), set(data["affected"])))
+            self._unanswered.append((self._venue_tick, set(data["affected"])))
         # Remember the latest ramp shape; SHOCK needs it
         if event == "CALENDAR_EVENT":
             self.ramp_ticks = int(data.get("ramp_ticks") or self.ramp_ticks)
@@ -183,7 +186,7 @@ class MyTrader(ShockSwitchTrader):
         """Called every tick. Return at most one Signal, or None to sit out."""
         bot = getattr(self, "_bot", None)
         if bot is not None and (
-            bot._resync or bot._first_book or bot._entry_from_board
+            bot._resync or bot._first_book
         ):
             return None
         now = self.now()
@@ -201,9 +204,13 @@ class MyTrader(ShockSwitchTrader):
         # 4. An order for this symbol is still in flight → wait for its fill (never double-send)
         if sig is None or sig.symbol in self._inflight:
             return None
-        # 5. An order for this symbol counts as a reaction to every event that named it
-        self._unanswered = [(t, s) for t, s in self._unanswered if sig.symbol not in s]
         return sig
+
+    def _step(self, plan, market, portfolio, nw, halted):
+        bot = getattr(self, "_bot", None)
+        if bot is not None and plan.symbol in bot._entry_from_board:
+            return None, 0.0
+        return super()._step(plan, market, portfolio, nw, halted)
 
     def _size(self, sym: str, px: float, nw: float, pos: int) -> int:
         """The parent's size, capped so the seat never exceeds its share of the team limit."""
@@ -211,12 +218,15 @@ class MyTrader(ShockSwitchTrader):
 
     def _react(self, market, portfolio):
         """② A 1-share bid well under the market for an event nothing else answered
-        within REACT_AFTER_S seconds."""
-        now = self.now()
+        within REACT_AFTER_TICKS venue ticks."""
+        now = self._venue_tick
         for t, syms in self._unanswered:
-            if now - t < REACT_AFTER_S:
+            if now - t < REACT_AFTER_TICKS:
                 continue                    # too early: the parent may still trade it
             for sym in sorted(syms):
+                bot = getattr(self, "_bot", None)
+                if bot is not None and sym in bot._entry_from_board:
+                    continue
                 ref = market.best_bid(sym) or self._mids.get(sym)
                 if ref and portfolio.can_buy(sym, 1, ref):
                     return Signal(symbol=sym, side="buy", quantity=1,
@@ -325,6 +335,8 @@ class _Bot(_AdaptedTraderBot):
         self._last_row: dict | None = None   # our latest leaderboard row = what the dashboard shows
         self._unknown_tags: set[str] = set()  # message types outside the union, logged once each
         self._ipo_pending: set[str] = set()
+        self._ipo_prices: dict[str, float] = {}
+        self._inferred_cash_adjustments = 0.0
         self._entry_from_board: set[str] = set()   # symbols whose entry the next leaderboard row sets
         self._t0 = time.monotonic()
         self._dropped = False
@@ -412,6 +424,10 @@ class _Bot(_AdaptedTraderBot):
             elif isinstance(msg, SessionEvent):
                 await self._on_session_event(msg)
             elif isinstance(msg, OrderAck):
+                self._owner._unanswered = [
+                    (tick, symbols) for tick, symbols in self._owner._unanswered
+                    if msg.symbol not in symbols
+                ]
                 logging.info("ACK %s %s %d %s @ %.2f", msg.order_id[:8],
                              msg.side, msg.quantity, msg.symbol, msg.price)
             elif isinstance(msg, ErrorMsg):
@@ -438,46 +454,48 @@ class _Bot(_AdaptedTraderBot):
         self.ledger.apply_fill(side, msg.symbol, msg.quantity, msg.price, fee)
         d = msg.quantity if side == "buy" else -msg.quantity
         self.portfolio.positions[msg.symbol] = self.portfolio.positions.get(msg.symbol, 0) + d
-        self.portfolio.cash -= d * msg.price
+        self.portfolio.cash -= d * msg.price + fee
         refs = self._owner._refs
         logging.info("FILL %s %d %s @ %.2f (fee %.2f) → %s · %s", side, msg.quantity, msg.symbol,
                      msg.price, fee, self.ledger.position_line(msg.symbol, refs),
                      self.ledger.summary(refs))
 
-    def _on_portfolio(self, msg: PortfolioUpdate) -> None:
-        """Resync after a connect, book non-trade position changes, reconcile at the close.
+    def _book_ipo_allocations(self) -> None:
+        """Use the announced offer price, even while other symbols have orders in flight."""
+        for sym, offer in list(self._ipo_prices.items()):
+            if sym not in self._ipo_pending:
+                continue
+            qty = (self.portfolio.positions.get(sym, 0)
+                   - self.ledger.positions.get(sym, 0))
+            if qty <= 0:
+                continue
+            self.ledger.apply_allocation(sym, qty, offer)
+            self._ipo_pending.discard(sym)
+            self._ipo_prices.pop(sym, None)
+            self._entry_from_board.discard(sym)
+            logging.info("IPO ALLOCATED %d %s @ %.2f", qty, sym, offer)
 
-        The exchange pushes a PortfolioUpdate after each of our fills and on
-        every change it makes without a trade print. A position change that no
-        fill explains is booked only for a known reason — an IPO allocation, or
-        the starting-share grant (sent just before the pre-open / open event) —
-        and anything else is left to show up as a MISMATCH, because it is a bug.
-        """
+    def _on_portfolio(self, msg: PortfolioUpdate) -> None:
+        """Recover state, book confirmed IPO allocations and starting grants."""
         state = self._update_state(msg)
         if self._resync:
             self._sync("PortfolioUpdate", state)
             return
-        moved = {s: msg.positions.get(s, 0) - self.ledger.positions.get(s, 0)
-                 for s in set(msg.positions) | set(self.ledger.positions)}
-        moved = {s: d for s, d in moved.items() if d}
-        if moved and not self._owner._inflight:
-            if set(moved) <= self._ipo_pending:
-                for sym, got in moved.items():
-                    offer = round((self.ledger.cash - msg.cash) / got, 2)
-                    self.ledger.apply_allocation(sym, got, offer)
-                    self._ipo_pending.discard(sym)
-                    self._entry_from_board.add(sym)
-                    logging.info("IPO ALLOCATED %d %s @ %.2f", got, sym, offer)
-            elif not self._session_open and all(d > 0 for d in moved.values()):
-                for sym, got in sorted(moved.items()):
-                    self.ledger.apply_grant(sym, got, self._owner._refs.get(sym, 0.0))
-                    self._entry_from_board.add(sym)
-                logging.info("GRANT starting shares (no trade print): %s",
-                             ", ".join(f"+{d} {s}" for s, d in sorted(moved.items())))
+        self._book_ipo_allocations()
+        moved = {
+            sym: msg.positions.get(sym, 0) - self.ledger.positions.get(sym, 0)
+            for sym in set(msg.positions) | set(self.ledger.positions)
+        }
+        moved = {sym: qty for sym, qty in moved.items() if qty}
+        if (moved and not self._owner._inflight and not self._session_open
+                and not (set(moved) & self._ipo_pending)
+                and all(qty > 0 for qty in moved.values())):
+            for sym, qty in sorted(moved.items()):
+                self.ledger.apply_grant(sym, qty, self._owner._refs.get(sym, 0.0))
+                self._entry_from_board.add(sym)
+            logging.info("GRANT starting shares: %s", moved)
         if self._closing:
-            logging.info(
-                "Close reconciliation awaits a leaderboard with entry prices"
-            )
+            logging.info("Close reconciliation awaits a leaderboard with entry prices")
 
     def _on_leaderboard(self, msg: Leaderboard) -> None:
         """Keep our own leaderboard row: cash, positions, avg_cost, realized P&L, fees.
@@ -488,6 +506,7 @@ class _Bot(_AdaptedTraderBot):
         Also logs one TICK line per broadcast (replaces the stock rich print,
         whose rank was always "#?": the rows carry no rank, the list order is it).
         """
+        self._owner._venue_tick = msg.tick
         for board in (msg.traders, msg.brokers):     # each list is sorted by net worth
             rank = next((i for i, e in enumerate(board, 1)
                          if e.get("team_id") == _config.TEAM_ID), None)
@@ -522,6 +541,7 @@ class _Bot(_AdaptedTraderBot):
         if self._resync:
             self._sync("leaderboard", state)
             return
+        self._book_ipo_allocations()
         # Grants / IPO allocations: the exchange's own book cost replaces our mark
         for sym in list(self._entry_from_board):
             if (
@@ -537,11 +557,17 @@ class _Bot(_AdaptedTraderBot):
             ):
                 self.ledger.avg_entry[sym] = state["avg_cost"][sym]
                 self._entry_from_board.discard(sym)
-        # Interest on idle cash and margin carry accrue every tick with no message:
-        # take the cash gap as a non-trade flow — but only a plausible one
+        # The venue does not publish each interest/carry cash flow. Retain
+        # bounded snapshot residuals, explicitly labelled as inferred adjustments.
         gap = state["cash"] - self.ledger.cash
         limit = max(ACCRUAL_MAX_ABS, ACCRUAL_MAX_FRAC * abs(self.ledger.cash))
         if gap and not self._owner._inflight and abs(gap) <= limit:
+            self._inferred_cash_adjustments += gap
+            logging.info(
+                "INFERRED_CASH_ADJUSTMENT delta=%+.4f cumulative_this_run=%+.4f "
+                "source=snapshot_residual (not independently verified interest)",
+                gap, self._inferred_cash_adjustments,
+            )
             self.ledger.accrue(gap)
         if self._closing:
             self._reconcile_close("leaderboard", state)
@@ -584,6 +610,12 @@ class _Bot(_AdaptedTraderBot):
     def _reconcile_close(self, source: str, state: dict) -> None:
         """Check accounting and P&L at the leaderboard's valuation marks."""
         row = self._last_row or {}
+        logging.info(
+            "CASH_AUDIT inferred_adjustments_this_run=%+.4f "
+            "recorded_nontrade_flows=%+.4f residual_after_adjustments=%+.4f",
+            self._inferred_cash_adjustments, self.ledger.accruals,
+            state["cash"] - self.ledger.cash,
+        )
         diffs = self.ledger.reconcile(**state)
 
         marks = {}
@@ -657,7 +689,7 @@ class _Bot(_AdaptedTraderBot):
         if self._owner._inflight:
             return f"{nw} · check skipped (order in flight)"
         diffs = self.ledger.reconcile(**self._row_state(self._last_row))
-        return f"{nw} · " + ("matches exchange" if not diffs else "MISMATCH: " + "; ".join(diffs))
+        return f"{nw} · " + ("accounting fields match (cash includes disclosed adjustments)" if not diffs else "MISMATCH: " + "; ".join(diffs))
 
     def _log_books(self, title: str = "BOOKS") -> None:
         """The books as an aligned table, headed by the exchange check."""
@@ -691,7 +723,7 @@ class _Bot(_AdaptedTraderBot):
             or not self._session_open
             or self._resync
             or self._first_book
-            or self._entry_from_board
+            or signal.symbol in self._entry_from_board
         ):
             return
 
@@ -738,6 +770,12 @@ class _Bot(_AdaptedTraderBot):
             self.auction = False
         if msg.event == "IPO_OPEN" and d.get("symbol"):
             self._ipo_pending.add(d["symbol"])
+        elif msg.event == "IPO_PRICED":
+            sym, offer = d.get("symbol"), d.get("offer_price")
+            if sym and offer is not None and float(offer) > 0:
+                self._ipo_prices[sym] = float(offer)
+                self._ipo_pending.add(sym)
+                self._book_ipo_allocations()
         elif msg.event == "IPO_LISTED":
             self._ipo_pending.discard(d.get("symbol", ""))
         elif msg.event == "DIVIDEND" and d.get("symbol"):

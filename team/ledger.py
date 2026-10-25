@@ -144,7 +144,7 @@ class Ledger:
         """One line: cash and the P&L totals."""
         return (f"cash {self.cash:,.2f} · realized {self.realized_pnl:+,.2f} · "
                 f"unrealized {self.unrealized_pnl(marks):+,.2f} · fees {self.fees:,.2f} · "
-                f"interest/carry/dividends {self.accruals:+,.2f}")
+                f"non-trade cash incl. inferred residuals {self.accruals:+,.2f}")
 
     def position_line(self, symbol: str, marks: dict[str, float]) -> str:
         """One symbol: quantity, entry, mark and its unrealized P&L."""
