@@ -145,6 +145,9 @@ Research-vs-production difference: research event2 lacks IPO and uses SeasonTrad
 - Pins: tests/production_pins.json records approved hashes for team/trader.py and new team/event2.py (reason+approval); test_alpha now also proves research/legacy_trader_e4d8c54.py == original pinned hash. team/broker.py unchanged and still pinned.
 ### FREEZE (before final): production candidate = MyTrader(strategy='event2') with Event2Config defaults (cap 150, gross 105000, reserve 0.35, notional 0.30, maxsyms 6, others as before). Fallback = MyTrader() baseline (default). Controls: deployed_trader (verbatim original), cash_trader, prod_baseline_trader (deployed caps), prod_baseline_trader@105k/0.35 (equal capital). FINAL SEEDS 4001-4100 run once; no changes after.
 
+### E10 — FINAL (4001-4100, once, frozen at bc5dbac): see TRADER1_FINAL.md. Event2 +0.201 vs cash; +0.098 corrected baseline vs original; Event2 +0.077 vs corrected baseline (deployed limits), +0.059 vs equal-capital baseline (P(win)=0.66). Seeds 4001-4100 CONSUMED. Stress (dev2) in TRADER1_FINAL.md. Open: $3.12 drift under 19-reconnect headroom storm (both bots).
+DECISION: GO corrected baseline; Event2 conditional (requires accepting relaxed gross/reserve + headroom coordination). Nothing deployed/pushed.
+
 ## Next steps (updated after E6)
 0. Open Trader 1: overshoot-fade, IPO validation, thin-liquidity weakness, weeks 8-9 (no edge), latency cash discrepancy, run rehearsal.py, port futures guard to production with documented hash-pin update (needs authorization). Broker work paused.
 1. (done: E1 above)

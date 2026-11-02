@@ -21,3 +21,8 @@ By week (sealed, 20 seeds each, event2 minus season_trader): wk6 +0.026, wk7 +0.
 - Futures guard exists only in research classes; deployed MyTrader would trade ARENA10 if activated for weeks 9-10.
 - Team-wide position limit: event2 uses cap_shares=400 per symbol; deployed seats cap at 150 (`SEAT_POSITION_CAP`) and a second trader seat shares the same team limit. Live use needs an explicit allocation decision.
 - Not exercised: the real WebSocket path (research/rehearsal.py exists but was not run), hosted rate limits/quotas.
+
+
+---
+# Update - integration phase (supersedes the 400-share sealed table above for deployment purposes)
+See TRADER1_FINAL.md. Final seeds 4001-4100: Event2 +0.201 vs cash; +0.077 vs corrected baseline; +0.059 vs equal-capital baseline (P(win)=0.66). Stress (dev2, corrected harness): holds under fees/volatility/competitive opponents (+0.076..+0.104), shrinks under +1s latency (+0.032), absent in thin liquidity (+0.001), negative when team headroom < seat cap (-0.031). Earlier latency-stress figures (E5) were produced by an inexact reconnect emulation and are superseded.

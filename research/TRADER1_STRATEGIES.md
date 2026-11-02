@@ -14,3 +14,8 @@ All run through the real `ExchangeServer` and the real `_Bot` adapter (`research
 | event2_long_trader | same, long only | validated; worse than season_trader on score |
 
 Not implemented / not tested: overshoot fade after the peak, Kelly/vol-targeted sizing, cross-asset lead-lag, online models, passive entries for Trader 1, futures trading, Week-7 message-quota stress beyond latency. These remain open; they are NOT rejected on evidence.
+
+
+---
+# Update - production integration
+`prod_baseline_trader` = actual `team.trader.MyTrader()` with week-aware activation (GRADED_WEEKS 5-10), futures guard, IPO unchanged. `prod_event2_trader` = actual `MyTrader(strategy='event2')` using `team/event2.py` (shared with the research wrapper; parity verified: identical orders and P&L on sealed seeds 1001-1006,1010 and dev2 3001/3002/3004 across parameter-default refactors). `deployed_trader` = verbatim original. Differences research harness vs bot: harness uses a virtual FIFO wire and emulated reconnect; research `event2_trader` lacks IPO participation and uses `SeasonTraderBot._place_order` (no pending-buy reservation/price-band step); production `_Bot._place_order` applies those plus the short gate, SSR, seat cap and equity floor again at the outbound boundary.

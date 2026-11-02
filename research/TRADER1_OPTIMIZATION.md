@@ -7,3 +7,10 @@ Protocol (frozen in `research/SPLITS.json` / PROGRESS.md before use): dev seeds 
 3. Validation and sealed runs used the frozen defaults only.
 
 Evidence that more capital is not the lever: gross exposure averages $95k (max $136k) for event2 vs $71k for season_trader, while drawdown p95 stays under 1%; the gain is limited by displayed depth and by the number of events (3-5 per week), not by risk limits.
+
+
+---
+# Update - integration phase
+- Real constraints (seat cap 150, gross 70k, reserve 0.60): Event2 default = +0.016 vs corrected baseline (n.s.). (dev2)
+- Capital decomposition (dev2): relaxing caps alone lifts the baseline +0.015; Event2 at equal relaxed caps +0.048 (notional .15) / +0.084 (notional .30, 6 symbols). The notional/maxsyms choice came from 4 mini-sweep configs on dev2 only, then was frozen; the final pool shows the shrunken effect (+0.059 equal-capital).
+- Source of the baseline gain over the original is mostly activation (weeks 6-10) and IPO participation retained in `prod_baseline_trader`.
