@@ -1,0 +1,375 @@
+"""Research-only strategy variants; original team classes remain the control.
+
+Only public event/book/account fields enter decisions. These classes do not
+connect by themselves. Use the isolated research harness/rehearsal. Passive
+orders retain reservation/cancel confirmation handling, but distributed maker
+fill/snapshot ordering remains an explicit promotion gate.
+"""
+from __future__ import annotations
+
+import math
+import time
+from dataclasses import dataclass
+
+from arena import Signal
+from arena.broker import _AdaptedBrokerBot
+from shared.messages import PlaceOrder
+from team.trader import MyTrader, _Bot
+from team.broker import MyBroker, _RiskBrokerBot
+import team.trader as trader_module
+import team.broker as broker_module
+
+
+@dataclass(frozen=True)
+class StrategyConfig:
+    exposure: float = 1.0
+    passive: bool = False
+    spread_bps: float = 60.0
+    quote_size: int = 2
+    quote_refresh: float = 5.0
+    skew_bps: float = 0.0
+    signal: str = "event"  # event, imbalance, reversion, combined
+    enable_short: bool = False
+    entry_fraction: float = .5
+    take_fraction: float = .9
+    ipo: bool = False
+
+    def __post_init__(self):
+        if not 0 < self.exposure <= 2 or self.quote_size < 1 or self.quote_refresh < 1:
+            raise ValueError("research exposure must be (0,2], quote_size >=1, refresh >=1")
+        if self.signal not in {"event", "imbalance", "reversion", "combined"}:
+            raise ValueError("unknown signal")
+
+
+def _week(data):
+    return int(data.get("week", (data.get("scenario") or {}).get("week", 0)))
+
+
+class SeasonTrader(MyTrader):
+    def __init__(self, config=None):
+        super().__init__()
+        self.research_config = config or StrategyConfig()
+        self._shorts_allowed = False
+        self._short_gate_known = False
+        self._ssr = set()
+        self._research_entry = {}
+
+    def on_event(self, event, message, data):
+        super().on_event(event, message, data)
+        if event in {"WEEK_CHANGED", "SESSION_OPEN"}:
+            self._week5_active = 5 <= _week(data) <= 10
+            flags = (data.get("scenario") or data).get("flags", {})
+            self._shorts_allowed = bool(flags.get("shorts_allowed", False))
+        if event == "SESSION_OPEN":
+            if not data.get("late_join", False):
+                self._ssr.clear()
+                self._short_gate_known = True
+            # The current handshake does not replay SSR. Missing it while
+            # disconnected cannot be interpreted as permission to short.
+            self._shorts_allowed = self._shorts_allowed and self._short_gate_known
+        if event == "SSR_ON" and data.get("symbol"):
+            self._ssr.add(data["symbol"])
+        if event == "MARKET_STATE":
+            self._ssr.update(data.get("ssr_active", []))
+        if event == "CALENDAR_EVENT" and self.research_config.enable_short and self._shorts_allowed:
+            for symbol in data.get("affected", []):
+                p = self.plans.get(symbol)
+                if (p and p.pct < 0 and p.held == 0 and p.core_sold == 0
+                        and (self._portfolio is None or self._portfolio.positions.get(symbol, 0) == 0)):
+                    p.mode, p.state = "short", "enter"
+
+    def on_reconnect(self):
+        super().on_reconnect()
+        self._short_gate_known = False
+        self._shorts_allowed = False
+
+    def on_ipo(self, symbol, lo, hi, shares, data):
+        # Isolate IPO hypothesis; activation fix must not silently add IPO risk.
+        if not self.research_config.ipo or not self._portfolio or hi <= 0:
+            return None
+        qty = min(int(150 * self.research_config.exposure), shares,
+                  max(0, int(self._portfolio.cash * .1 / hi)))
+        return (qty, hi) if qty else None
+
+    def _size(self, sym, px, nw, pos):
+        cap = int(150 * self.research_config.exposure)
+        return max(0, min(cap - max(pos, 0), int(nw * .25 * self.research_config.exposure / px)))
+
+    def _step(self, p, market, portfolio, nw, halted):
+        if p.mode != "short":
+            # Parent uses fixed timing for control-comparable positive events.
+            return super()._step(p, market, portfolio, nw, halted)
+        sym = p.symbol
+        bot = getattr(self, "_bot", None)
+        if (self._market_halted or sym in self._halted_symbols
+                or (bot is not None and sym in bot._entry_from_board)):
+            return None, 0
+        bid, ask = market.best_bid(sym), market.best_ask(sym)
+        age = self.now() - p.t0
+        pos = int(portfolio.positions.get(sym, 0))
+        cfg = self.research_config
+        if p.state == "enter":
+            limit = p.pre * (1 + cfg.entry_fraction * p.pct)
+            if halted or sym in self._ssr or age > p.ramp_s * .5 or (bid and bid < limit):
+                p.state = "hold" if p.held else "done"
+                return None, 0
+            target = self._size(sym, bid or p.pre, nw, 0)
+            want = target - p.held
+            if want <= 0:
+                p.state = "hold"
+            elif bid:
+                return Signal(symbol=sym, side="sell", quantity=min(60, want), price=round(limit, 2)), 3
+        if p.state == "hold" and p.held and ask:
+            take = p.pre * (1 + cfg.take_fraction * p.overshoot * p.pct)
+            stop = p.entry_px * (1 + abs(p.pct) / 2)
+            if ask <= take or ask >= stop or age > 3 * p.ramp_s:
+                return Signal(symbol=sym, side="buy", quantity=min(60, p.held, max(0, -pos)),
+                              price=round(ask * 1.001, 2)), 5
+        if p.state == "hold" and not p.held:
+            p.state = "done"
+        return None, 0
+
+    def on_fill(self, side, symbol, quantity, price):
+        p = self.plans.get(symbol)
+        if p and p.mode == "short":
+            p.log.append((self.now(), side, quantity, price))
+            if side == "sell":
+                p.entry_px = (p.entry_px * p.held + price * quantity) / (p.held + quantity)
+                p.held += quantity
+            else:
+                p.held = max(0, p.held - quantity)
+            f = self._inflight.get(symbol)
+            if f and f[0] == side:
+                f[1] = max(0, f[1] - quantity)
+        else:
+            super().on_fill(side, symbol, quantity, price)
+        if side == "buy":
+            self._research_entry.setdefault(symbol, (self.now(), price))
+        elif self._portfolio and self._portfolio.positions.get(symbol, 0) <= 0:
+            self._research_entry.pop(symbol, None)
+
+    def on_tick(self, market, portfolio):
+        cfg = self.research_config
+        event_signal = super().on_tick(market, portfolio)
+        if cfg.signal == "event":
+            return event_signal
+        if cfg.signal == "combined" and event_signal is not None:
+            return event_signal
+        bot = getattr(self, "_bot", None)
+        if self._market_halted or (bot and (bot._resync or bot._first_book)):
+            return None
+        for sym in market.symbols():
+            if sym in self._inflight or sym in self._halted_symbols or sym in self.plans:
+                continue
+            bid, ask = market.best_bid(sym), market.best_ask(sym)
+            if not bid or not ask:
+                continue
+            pos = portfolio.positions.get(sym, 0)
+            born, entry = self._research_entry.get(sym, (self.now(), ask))
+            if pos > 0 and (self.now() - born > 20 or bid < entry * .985 or bid > entry * (1 + 2*self.taker + .003)):
+                return Signal(symbol=sym, side="sell", quantity=min(pos, 30), price=bid)
+            hist = market.prices(sym)
+            if pos > 0 or len(hist) < 20:
+                continue
+            book = market._books.get(sym, {})
+            bids, asks = book.get("bids", []), book.get("asks", [])
+            bqty = sum(x[1] for x in bids[:3]); aqty = sum(x[1] for x in asks[:3])
+            imbalance = (bqty-aqty) / max(1, bqty+aqty)
+            mean = sum(hist[-20:]) / 20
+            reversion_edge = mean / ask - 1
+            # Observable price dislocation must pay both taker fees and spread.
+            edge = reversion_edge
+            if cfg.signal == "imbalance":
+                edge = (bid+ask)/2/ask - 1 + max(0, imbalance) * .003
+            if edge > 2*self.taker + .002 and (cfg.signal != "imbalance" or imbalance > .6):
+                return Signal(symbol=sym, side="buy", quantity=min(30, self._size(sym, ask, portfolio.net_worth(market), 0)), price=ask)
+        return None
+
+
+class SeasonTraderBot(_Bot):
+    async def _on_session_event(self, msg):
+        await super()._on_session_event(msg)
+        if msg.event in {"SESSION_OPEN", "WEEK_CHANGED"}:
+            self._owner.on_event(msg.event, msg.message, msg.data or {})
+
+    async def _place_order(self, signal):
+        """Same final reconciliation gates; configurable cash-funded risk budget.
+
+        Shorts are unlevered (gross <= .8 starting capital), explicitly public
+        flag gated, and forbidden under observed SSR. Locate rejection still
+        follows the original reconnect/reconciliation path.
+        """
+        owner = self._owner; cfg = owner.research_config
+        if (self.auction or not owner._week5_active or not self._session_open
+                or self._resync or self._first_book or signal.symbol in self._entry_from_board
+                or owner._market_halted or signal.symbol in owner._halted_symbols
+                or not self._has_server_snapshot or time.monotonic()-self._snapshot_at > 10
+                or getattr(self.portfolio, "liquidated", False) or owner._inflight):
+            return
+        if not math.isfinite(signal.price) or signal.price <= 0:
+            return
+        refs = owner._refs
+        marks = {s: refs.get(s) or self.market.mid_price(s) or 0 for s,q in self.portfolio.positions.items() if q}
+        if any(px <= 0 for px in marks.values()):
+            return
+        sym = signal.symbol; pos = self.portfolio.positions.get(sym, 0)
+        ref = refs.get(sym) or self.market.mid_price(sym)
+        if not ref or not .93*ref <= signal.price <= 1.07*ref:
+            return
+        cap = int(150*cfg.exposure)
+        gross = sum(abs(q)*marks[s] for s,q in self.portfolio.positions.items() if q)
+        gross_cap = 70_000*cfg.exposure
+        # Closing shorts/longs always permitted below the entry equity floor.
+        reducing = signal.side == "buy" and pos < 0 or signal.side == "sell" and pos > 0
+        if reducing:
+            qty = min(signal.quantity, abs(pos))
+        else:
+            if self.portfolio.net_worth(self.market) < trader_module.TRADER_EQUITY_HALT:
+                return
+            qty = min(signal.quantity, max(0, cap-abs(pos)),
+                      max(0, int((gross_cap-gross)//max(ref, signal.price))))
+            if signal.side == "buy":
+                reserve = trader_module.TRADER_STARTING_EQUITY - gross_cap
+                available = max(0, (self.portfolio.cash-reserve)*.95)
+                qty = min(qty, int(available//(signal.price*(1+max(owner.taker,.005)))))
+            elif not (cfg.enable_short and owner._shorts_allowed and sym not in owner._ssr):
+                return
+        if qty <= 0:
+            return
+        signal = signal.model_copy(update={"quantity": qty})
+        owner.on_sent(signal); owner._inflight[sym].append(signal.price)
+        if sym in owner._resume_pending:
+            owner._resume_sent.add(sym)
+        await self._send(PlaceOrder(team_id=trader_module._config.TEAM_ID, symbol=sym,
+                                   side=signal.side, order_type="ioc", price=signal.price, quantity=qty))
+
+
+class SeasonBroker(MyBroker):
+    def __init__(self, config=None):
+        self.research_config = config or StrategyConfig()
+
+    def spread(self, symbol, price, history):
+        if not price:
+            return None
+        cfg = self.research_config
+        returns = [abs(b/a-1) for a,b in zip(history[-20:-1], history[-19:]) if a > 0]
+        vol = sum(returns)/len(returns) if returns else 0
+        return max(.03, price*max(cfg.spread_bps/10000, min(.03, 8*vol)))
+
+    def skew(self, symbol, inventory):
+        return -inventory*self.research_config.skew_bps/10000
+
+
+class SeasonBrokerBot(_RiskBrokerBot):
+    def __init__(self, owner, exchange_url=None):
+        super().__init__(owner, exchange_url)
+        self._post_only_allowed = False
+        self._quote_at = {}
+
+    async def _on_session_event(self, msg):
+        await super()._on_session_event(msg)
+        d = msg.data or {}
+        if msg.event in {"WEEK_CHANGED", "SESSION_OPEN"}:
+            self._graded_week5 = 5 <= _week(d) <= 10
+            flags = (d.get("scenario") or d).get("flags", {})
+            self._post_only_allowed = bool(flags.get("post_only_allowed", False))
+        if msg.event == "SESSION_PRECLOSE":
+            self._continuous = False
+            await self.cancel_all_quotes()
+
+    async def quote_symbol(self, symbol):
+        cfg = self._owner.research_config
+        if not self._ready(symbol):
+            if any(k[0] == symbol for k in self._orders):
+                await self.cancel_quotes(symbol)
+            return
+        if any(k[0] == symbol for k in self._orders):
+            # Leave FIFO priority intact between planned refreshes.
+            if not cfg.passive or time.monotonic()-self._quote_at.get(symbol,0) >= cfg.quote_refresh:
+                await self.cancel_quotes(symbol)
+            return
+        if symbol in self._resume_pending:
+            await self._resume_probe(symbol)
+            return
+        ref = self.state.exchange_prices.get(symbol)
+        if not ref or ref <= 0:
+            return
+        spread = self.state.compute_spread(symbol)
+        skew = -ref * self._owner.research_config.skew_bps / 10000 * self.state.positions.get(symbol,0)
+        for side, price in (("buy", round(ref+skew-spread/2,2)), ("sell", round(ref+skew+spread/2,2))):
+            await self._send(PlaceOrder(team_id=broker_module.broker_config.TEAM_ID, symbol=symbol,
+                                       side=side, order_type="limit", price=price, quantity=cfg.quote_size))
+        self._quote_at[symbol] = time.monotonic()
+        self.state.last_quote_prices[symbol] = ref
+
+    async def _send(self, msg):
+        if not isinstance(msg, PlaceOrder):
+            return await super()._send(msg)
+        cfg = self._owner.research_config
+        kind = "post_only" if cfg.passive and msg.order_type != "ioc" else "ioc"
+        if kind == "post_only" and not self._post_only_allowed:
+            return
+        sym, side = msg.symbol, msg.side
+        if not self._ready(sym) or (sym,side) in self._orders:
+            return
+        marks = self.state.exchange_prices; ref = marks.get(sym,0)
+        if not ref or not math.isfinite(msg.price) or not .93*ref <= msg.price <= 1.07*ref:
+            return
+        if any(q and marks.get(s,0) <= 0 for s,q in self.state.positions.items()):
+            return
+        pos = self.state.positions.get(sym,0)
+        buy = sum(e[0] for (s,d),e in self._orders.items() if s == sym and d == "buy")
+        sell = sum(e[0] for (s,d),e in self._orders.items() if s == sym and d == "sell")
+        qty = min(msg.quantity, max(0, int(20*cfg.exposure)-pos-buy) if side == "buy" else max(0,pos-sell))
+        pending = sum(e[0]*max(e[1],marks.get(s,e[1])) for (s,d),e in self._orders.items() if d == "buy")
+        gross = sum(abs(q)*marks[s] for s,q in self.state.positions.items() if q)
+        if side == "buy":
+            if self._last_equity < broker_module.BROKER_EQUITY_HALT:
+                return
+            cap = broker_module.BROKER_GROSS_CAP*cfg.exposure
+            reserve = broker_module.BROKER_STARTING_EQUITY*.6/cfg.exposure
+            qty = min(qty, max(0,int(((self.state.cash-reserve)/(1+self._taker)-pending)//msg.price)),
+                      max(0,int((cap-gross-pending)//max(ref,msg.price))))
+        if qty <= 0:
+            return
+        self._orders[sym,side] = [qty,msg.price,None,kind == "ioc",self._probe_submission == (sym,side)]
+        await _AdaptedBrokerBot._send(self,msg.model_copy(update={"quantity":qty,"order_type":kind}))
+        return True
+
+
+def make_candidate(name, params=None):
+    """Return owner and real adapter; caller must isolate state before construction."""
+    params = dict(params or {})
+    if name in {"baseline_trader", "cash_trader"}:
+        owner = MyTrader()
+        if name == "cash_trader":
+            owner.on_tick = lambda market, portfolio: None
+            owner.on_ipo = lambda *args: None
+        return owner, _Bot(owner)
+    if name in {"baseline_broker", "cash_broker"}:
+        owner = MyBroker(); bot = _RiskBrokerBot(owner)
+        if name == "cash_broker":
+            async def no_quote(symbol):
+                return None
+            bot.quote_symbol = no_quote
+        return owner, bot
+    presets = {
+        "season_trader": {}, "season_broker": {},
+        "passive_broker": {"passive": True},
+        "short_trader": {"enable_short": True},
+        "aggressive_trader": {"exposure": 2.0},
+        "aggressive_broker": {"exposure": 2.0, "passive": True, "quote_size": 10},
+        "skew_broker": {"passive": True, "spread_bps": 30, "skew_bps": 1.0},
+        "imbalance_trader": {"signal": "imbalance"},
+        "reversion_trader": {"signal": "reversion"},
+        "combined_trader": {"signal": "combined"},
+        "ipo_trader": {"ipo": True},
+    }
+    if name not in presets:
+        raise ValueError(f"unknown candidate {name}")
+    config = StrategyConfig(**(presets[name] | params))
+    if name.endswith("broker"):
+        owner = SeasonBroker(config)
+        return owner, SeasonBrokerBot(owner)
+    owner = SeasonTrader(config)
+    return owner, SeasonTraderBot(owner)

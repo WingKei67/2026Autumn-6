@@ -19,3 +19,8 @@ team/state/
 # Offline alpha report caches (results and charts remain reviewable)
 alpha_results/**/mpl_cache/
 alpha_results/**/runner.pid
+
+# research raw outputs (backed up outside repo; registry links by id)
+research/results/
+research/figures/*.tmp
+data/reports/eod_*.json
