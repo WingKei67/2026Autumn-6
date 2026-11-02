@@ -73,6 +73,31 @@ Interpretation (honest):
 - Earlier harness runs mixed code versions inside one batch when the harness file was edited mid-batch: do not edit research/ during a batch (source_hash is taken at batch start only).
 - New broker variants: touch_broker / improve_broker / touch_skew_broker (post-only at/inside observed touch from public book snapshots via a read-only Tee on the wire).
 
+## PRIORITY OVERRIDE (user): Trader 1 first. Broker work paused.
+Broker sweep was stopped after 3 of 19 configs (results preserved in registry/backup; partial, NOT analysed, NOT validated). Earlier broker E1 numbers are invalid (see P0). Resume only after Trader 1 concludes.
+Commits: 061ec3c (checkpoint 1), 216312f (P0 fixes + checkpoint 2). Backups: ~/Desktop/FINM_33500/six-rings-research-backup/.
+
+### Trader 1 findings
+- Event structure (week json + calendar.py): direction is NOT announced in advance, but the fired CALENDAR_EVENT carries signed pct/ramp_ticks/overshoot, so direction is public at fire time. In a traced run the message arrived ~12 ticks after the scheduled tick, when the reference had begun to move; price then ramps to overshoot*pct (3-8% moves) and settles back.
+- Baseline (activation-fixed) `season_trader` leaves capital idle: cap 150 shares/symbol and one 60-share IOC at a time; e.g. INTC at $22 bought 130 shares (~$2.9k) on a +5% move. Real limiter is displayed depth (top of book 1-30 shares) -> entries are depth-limited, not only cap-limited.
+- New `event2_trader` / `event2_long_trader` (research/strategies.py `EventTrader`): notional-budget sizing, long+short on the signed move, depth-aware IOC chunks, exit at fraction of overshoot/time/stop; futures excluded; SSR/shorts-gate respected.
+
+### E2 — dev seeds 11-50 (40 paired seeds, wk 6-10 rotating, 1500 ticks, mixed opponents), same code hash, 0 failed / 0 DQ
+| variant | dScore vs cash | 95% CI | P(>0) | dPnL | worst paired dScore |
+|---|---|---|---|---|---|
+| baseline_trader (deployed, inactive wk6-10) | +0.034 | [+0.009,+0.062] | 0.30 | +296 | -0.08 |
+| season_trader (activation fixed, futures guard) | +0.105 | [+0.073,+0.137] | 0.88 | +1310 | -0.21 |
+| short_trader | +0.114 | [+0.087,+0.142] | 0.93 | +1322 | -0.06 |
+| event2_long_trader | +0.067 | [+0.049,+0.087] | 0.85 | +993 | -0.00 |
+| event2_trader (long+short, default params) | +0.191 | [+0.149,+0.235] | 0.93 | +2382 | -0.10 |
+Caveats: dev pool (not OOS); event2 design was informed by tracing ONE dev seed (11); unadjusted CIs; shorts account for most of the gain (long-only +0.067).
+Protocol (frozen before search): random search (24 configs) on dev seeds 11-30 -> max-t bootstrap (research/maxboot.py) -> top configs confirmed on dev seeds 31-70 -> independent validation seeds 101-160 -> sealed 1001-1100 once.
+
+### E3 — random search (24 configs + default, 20 dev seeds 11-30) + max-t bootstrap (research/rsearch.py, research/maxboot.py)
+- Versus cash every config is significant (family effect is real on dev).
+- Versus the DEFAULT event2_trader, selection-adjusted: best config +0.022 (adj.p 0.28; max-t critical 3.82). NO tuned config beats the default; 15/24 are lower, several clearly worse (low ev_take 0.6, tiny notional, ev_entry 0.3). Larger notional/caps do not help (entry is depth-limited). Conclusion: keep default parameters; the search is a negative result, not a source of improvement.
+### FROZEN before validation (2026-11-02): candidates = event2_trader (defaults), event2_long_trader, season_trader (corrected baseline), baseline_trader (deployed), cash_trader (control). No parameter changes after this line. Validation seeds 101-160 (60 paired, weeks rotate 6-10). Sealed 1001-1100 untouched until final freeze.
+
 ## Next steps
 1. (done: E1 above)
 2. Root-cause ORDER_NOT_FOUND; check broker `DISQUALIFIED accounting` rows seen in Codex's train runs.

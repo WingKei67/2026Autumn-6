@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT/'research/results'
 REGISTRY = ROOT/'research/EXPERIMENT_REGISTRY.csv'
-SPLITS = {'train': list(range(1,7)), 'validation': list(range(101,107)),
+SPLITS = {'train': list(range(1,7)), 'validation': list(range(101,161)),
           'sealed': list(range(1001,1101)),
           # Added after seeing train-only results: larger tuning pool; never overlaps other splits.
           'dev': list(range(11,71))}

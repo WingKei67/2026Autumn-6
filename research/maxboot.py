@@ -35,6 +35,6 @@ def main():
     print(f'max-t 95% critical value {crit:.2f}')
     for k in sorted(D, key=lambda k: -obs[k]):
         p = sum(m >= obs[k] for m in maxes) / a.B
-        print(f'{k[:70]:72s} mean {st.mean(D[k]):+.3f} t {obs[k]:+.2f} adj.p {p:.3f} {"*" if p<.05 else ""}')
+        print(f'{k[:160]:160s} mean {st.mean(D[k]):+.3f} t {obs[k]:+.2f} adj.p {p:.3f} {"*" if p<.05 else ""}')
 
 if __name__ == '__main__': main()
