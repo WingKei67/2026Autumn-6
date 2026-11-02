@@ -21,7 +21,7 @@ def load(stage, sha=None):
         if r['stage'] != stage or r['status'] != 'completed': continue
         if sha and r['source_hash'] != sha: continue
         import json as _j; prm = _j.loads(r['config']).get('params') or {}
-        key = r['name'] + (str(sorted(prm.items())) if prm else '')
+        key = r['name'] + (str(sorted(prm.items())) if prm else '') + ('' if (r['stress'], r['population']) == ('base', 'mixed') else f" @{r['stress']}/{r['population']}")
         out[key][int(r['seed'])] = dict(score=float(r['score']), pnl=float(r['pnl']),
                                               fees=float(r['fees'] or 0), rebates=float(r['rebates'] or 0),
                                               liq=r['liquidated'] == 'True', week=int(r['week']),
@@ -46,9 +46,13 @@ def main():
     sha = a.sha or [r for r in rows if r['stage'] == a.stage][-1]['source_hash']
     data = load(a.stage, sha)
     base = data[control]
+    conds = sorted({k.split(' @')[1] for k in data if ' @' in k})
     print(f"{'name':20s}{'n':>4}{'dScore':>9}{'95% CI':>20}{'P(>0)':>7}{'dPnL':>8}{'worstD':>8}{'liq':>4}{'dq':>3}{'fees':>7}{'reb':>7}")
     for name, d in sorted(data.items()):
-        if not name.split('[')[0].endswith(a.role): continue
+        if not name.split(' @')[0].split('[')[0].endswith(a.role): continue
+        cond = name.split(' @')[1] if ' @' in name else ''
+        base = data.get(control + (' @' + cond if cond else ''))
+        if base is None: continue
         seeds = [s for s in d if s in base]
         if len(seeds) < 2: continue
         ds = [d[s]['score'] - base[s]['score'] for s in seeds]

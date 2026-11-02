@@ -98,6 +98,28 @@ Protocol (frozen before search): random search (24 configs) on dev seeds 11-30 -
 - Versus the DEFAULT event2_trader, selection-adjusted: best config +0.022 (adj.p 0.28; max-t critical 3.82). NO tuned config beats the default; 15/24 are lower, several clearly worse (low ev_take 0.6, tiny notional, ev_entry 0.3). Larger notional/caps do not help (entry is depth-limited). Conclusion: keep default parameters; the search is a negative result, not a source of improvement.
 ### FROZEN before validation (2026-11-02): candidates = event2_trader (defaults), event2_long_trader, season_trader (corrected baseline), baseline_trader (deployed), cash_trader (control). No parameter changes after this line. Validation seeds 101-160 (60 paired, weeks rotate 6-10). Sealed 1001-1100 untouched until final freeze.
 
+### E4 — VALIDATION, seeds 101-160 (60 independent paired seeds, frozen candidates, base stress, mixed opponents). 300/300 completed, 0 liquidations, 0 accounting errors.
+| variant | dScore vs cash | 95% CI | P(>0) | dPnL | vs season_trader (corrected baseline) | vs deployed baseline_trader |
+|---|---|---|---|---|---|---|
+| baseline_trader (deployed) | +0.027 | [+0.010,+0.045] | 0.28 | +355 | -0.070 | 0 |
+| season_trader | +0.097 | [+0.074,+0.119] | 0.92 | +1204 | 0 | +0.070 [+0.048,+0.092] |
+| event2_long_trader | +0.059 | [+0.045,+0.075] | 0.85 | +1526 | -0.037 [-0.057,-0.019] | +0.033 |
+| **event2_trader** | **+0.130** | [+0.103,+0.158] | 0.92 | **+2328** | **+0.034 [+0.012,+0.057], P(>0)=0.62, dPnL +1124** | **+0.103 [+0.077,+0.132], P(>0)=0.83, dPnL +1973** |
+Reading: dev -> validation shrinkage (event2 +0.191 -> +0.130). Edge over the corrected baseline is real but modest and unreliable per seed (P(>0)=0.62, worst -0.17); edge over the deployed bot is large mostly because the deployed bot is inactive in wk 6-10. Long-only event2 is WORSE than the corrected baseline on score -> the short leg is what adds value.
+Per-run score is per single week (25 snapshots); a season score pools weeks, so absolute levels differ; only paired deltas are meaningful.
+
+### E5 — stress (validation seeds 101-130, 30 paired; each condition has its own cash control)
+| condition | event2 dScore [95% CI] | dPnL | season_trader dScore | note |
+|---|---|---|---|---|
+| base/mixed (60 seeds) | +0.130 [+0.103,+0.158] | +2328 | +0.097 | |
+| competitive opponents | +0.171 [+0.125,+0.221] | +2951 | +0.095 | |
+| thin liquidity (passive_mm+noise only) | +0.045 [+0.028,+0.064] | +850 | +0.075 | **event2 WORSE than season_trader** |
+| fees x2 | +0.119 [+0.076,+0.166] | +2115 | +0.070 | |
+| latency +1.0s | +0.076 [+0.050,+0.102] | +1152 | +0.064 | 2 event2 + 1 season runs flagged accounting (see below) |
+| volatile (fundamental vol x2) | +0.099 [+0.050,+0.147] | +2093 | +0.061 | worst paired dScore -0.26 |
+Open item (NOT root-caused): the 3 latency-stress runs flagged `cash: ours vs exchange` differ by $50-380 (0.03-0.2%) at end of run with a SYMBOL_HALTED reject; probably in-flight fills at end under +1s latency, but unproven. Zero liquidations anywhere.
+### SEALED RUN started (once): seeds 1001-1100, frozen candidates only (cash, baseline, season, event2, event2_long). No changes after this.
+
 ## Next steps
 1. (done: E1 above)
 2. Root-cause ORDER_NOT_FOUND; check broker `DISQUALIFIED accounting` rows seen in Codex's train runs.
