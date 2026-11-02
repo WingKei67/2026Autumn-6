@@ -1,0 +1,9 @@
+{
+  "best_new_mean": "market_making",
+  "worst_new_mean": "basket",
+  "best_single_robustness": "event_momentum",
+  "minimum_lower_bounds": {
+    "event_momentum": 24.239341524754636,
+    "market_making": -89.14806432488118
+  }
+}

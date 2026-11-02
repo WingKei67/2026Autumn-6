@@ -1,0 +1,122 @@
+{
+  "generated_at": "2026-10-24 22:40:07",
+  "week": 4,
+  "label": "Market making \u2014 shorts unlock, post-only, opening auction, the ORCA IPO, purchase window 1",
+  "tick": 2412,
+  "trades": 53,
+  "checks": {
+    "cash_conservation": {
+      "ok": true,
+      "sum_team_cash_delta": 40051.97,
+      "explained_by_flows": 40051.97,
+      "unexplained_gap": -0.0,
+      "flows": {
+        "fees_to_venue": 224.2,
+        "dividends_net": 10.0,
+        "interest_credited": 43959.94,
+        "carry_burned": 93.77,
+        "seat_capital_in_flight": 0.0,
+        "ipo_proceeds_to_issuer": 3600.0
+      }
+    },
+    "volume_identity": {
+      "ok": true,
+      "sum_shares_bought": 2030,
+      "sum_shares_sold": 2030,
+      "exchange_market_volume": 2030
+    },
+    "position_conservation": {
+      "ok": true,
+      "midsession_grants": {},
+      "ipo_issued": {
+        "ORCA": 150
+      },
+      "breaks": {}
+    }
+  },
+  "teams": [
+    {
+      "bot": "rehearsal_mm",
+      "role": "broker",
+      "sod_positions": {
+        "AAPL": 20,
+        "MSFT": 20,
+        "NVDA": 20,
+        "TSLA": 20,
+        "AMZN": 20,
+        "GOOGL": 20,
+        "META": 20,
+        "NFLX": 20,
+        "AMD": 20,
+        "INTC": 20
+      },
+      "eod_positions": {
+        "AAPL": 20,
+        "MSFT": 20,
+        "NVDA": 20,
+        "TSLA": 20,
+        "AMZN": 20,
+        "GOOGL": 20,
+        "META": 20,
+        "NFLX": 20,
+        "AMD": 20,
+        "INTC": 20
+      },
+      "shares_bought": 1015,
+      "shares_sold": 1015,
+      "share_volume": 2030,
+      "notional_volume": 448408.5,
+      "trades": 53,
+      "sod_net_worth": 10058015.34,
+      "eod_net_worth": 10098740.83,
+      "day_pnl": 40725.49,
+      "realized_delta": -2608.1,
+      "eod_unrealized": -558.93,
+      "fees_delta": 0.0,
+      "rebates_delta": 448.41,
+      "carry_delta": 93.77
+    },
+    {
+      "bot": "6_rings_trader_2",
+      "role": "trader",
+      "sod_positions": {
+        "AAPL": 20,
+        "MSFT": 20,
+        "NVDA": 20,
+        "TSLA": 20,
+        "AMZN": 20,
+        "GOOGL": 20,
+        "META": 20,
+        "NFLX": 20,
+        "AMD": 20,
+        "INTC": 20
+      },
+      "eod_positions": {
+        "AAPL": 20,
+        "MSFT": 20,
+        "NVDA": 20,
+        "TSLA": 20,
+        "AMZN": 20,
+        "GOOGL": 20,
+        "META": 20,
+        "NFLX": 20,
+        "AMD": 20,
+        "INTC": 20,
+        "ORCA": 150
+      },
+      "shares_bought": 1015,
+      "shares_sold": 1015,
+      "share_volume": 2030,
+      "notional_volume": 448408.5,
+      "trades": 53,
+      "sod_net_worth": 158015.34,
+      "eod_net_worth": 158296.03,
+      "day_pnl": 280.69,
+      "realized_delta": 729.57,
+      "eod_unrealized": -257.64,
+      "fees_delta": 672.61,
+      "rebates_delta": 0.0,
+      "carry_delta": 0.0
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "test": {
+    "runs": 1400,
+    "same_tick_fills": 0,
+    "missing_fill_provenance": 0,
+    "liquidations": 0,
+    "position_violations": 0,
+    "team_position_violations": 0,
+    "rejection_codes": {
+      "SYMBOL_HALTED": 255,
+      "ORDER_NOT_FOUND": 62046,
+      "POST_ONLY_CROSS": 514,
+      "STP_CANCEL": 4
+    }
+  },
+  "priority_stress": {
+    "runs": 480,
+    "same_tick_fills": 0,
+    "missing_fill_provenance": 0,
+    "liquidations": 0,
+    "position_violations": 0,
+    "team_position_violations": 0,
+    "rejection_codes": {
+      "SYMBOL_HALTED": 118,
+      "ORDER_NOT_FOUND": 23106,
+      "POST_ONLY_CROSS": 229
+    }
+  },
+  "historical": {
+    "runs": 15,
+    "same_tick_fills": 0,
+    "missing_fill_provenance": 0,
+    "liquidations": 0,
+    "position_violations": 0,
+    "team_position_violations": 0,
+    "rejection_codes": {
+      "SESSION_CLOSED": 3
+    }
+  },
+  "test_rejections_by_strategy": {
+    "adaptive_allocator": {
+      "SYMBOL_HALTED": 31
+    },
+    "cross_asset": {
+      "SYMBOL_HALTED": 20
+    },
+    "event_regime": {
+      "SYMBOL_HALTED": 8
+    },
+    "no_trade": {},
+    "original": {
+      "SYMBOL_HALTED": 71
+    },
+    "original_active": {
+      "SYMBOL_HALTED": 82
+    },
+    "round1_combined": {
+      "SYMBOL_HALTED": 43,
+      "ORDER_NOT_FOUND": 62046,
+      "POST_ONLY_CROSS": 514,
+      "STP_CANCEL": 4
+    }
+  },
+  "new_strategy_maker_rebates": 0.0,
+  "test_unique_keys": 1400
+}

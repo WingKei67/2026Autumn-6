@@ -1,0 +1,124 @@
+[
+  {
+    "file": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/sessions/session_week02_20261009_204000.jsonl.gz",
+    "rows": 145844,
+    "types": {
+      "participant": 191,
+      "session_event": 7,
+      "leaderboard": 1294,
+      "order_ack": 34881,
+      "trade_execution": 4511,
+      "book_snapshot": 55375,
+      "order_reject": 21294,
+      "order_cancel": 28291
+    },
+    "events": {
+      "CALENDAR": 3,
+      "SESSION_OPEN": 1,
+      "CALENDAR_EVENT": 2,
+      "SESSION_CLOSED": 1
+    },
+    "symbols": [
+      "AAPL",
+      "AMD",
+      "AMZN",
+      "ARENA10",
+      "GOOGL",
+      "INTC",
+      "META",
+      "MSFT",
+      "NFLX",
+      "NVDA",
+      "TSLA"
+    ],
+    "first_tick": 824203,
+    "last_tick": 827029,
+    "spread_bps_median": 4.888780249328557,
+    "spread_bps_p95": 29.0979631425794,
+    "absolute_move_bps_median": 0.0,
+    "absolute_move_bps_p95": 2.4898848428267506,
+    "limitations": "Includes partial order events, but incoming order semantics and complete queue history are not guaranteed.",
+    "sha256": "b3af11d71034819c1405b0952a8c248e510794a470b82aa40c6db4159147b1b7"
+  },
+  {
+    "file": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/sessions/session_week03_20261016_204000_market.jsonl",
+    "rows": 48075,
+    "types": {
+      "session_event": 7,
+      "trade_execution": 3090,
+      "book_snapshot": 44978
+    },
+    "events": {
+      "CALENDAR": 3,
+      "SESSION_OPEN": 1,
+      "CALENDAR_EVENT": 2,
+      "SESSION_CLOSED": 1
+    },
+    "symbols": [
+      "AAPL",
+      "AMD",
+      "AMZN",
+      "ARENA10",
+      "GOOGL",
+      "INTC",
+      "META",
+      "MSFT",
+      "NFLX",
+      "NVDA",
+      "TSLA"
+    ],
+    "first_tick": 1405547,
+    "last_tick": 1408180,
+    "spread_bps_median": 4.271678769756676,
+    "spread_bps_p95": 28.19311076036962,
+    "absolute_move_bps_median": 0.0,
+    "absolute_move_bps_p95": 2.6818500639513854,
+    "limitations": "Aggregated depth and public prints; no individual historical order/cancel IDs or reliable queue reconstruction.",
+    "sha256": "b9b93c38a5f52b5a2a79b07cf4feda53560669202cc2bf9f67b11c60ffab8b1d"
+  },
+  {
+    "file": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/sessions/session_week04_20261023_204025_market.jsonl",
+    "rows": 40621,
+    "types": {
+      "session_event": 19,
+      "book_snapshot": 36096,
+      "trade_execution": 4506
+    },
+    "events": {
+      "CALENDAR": 5,
+      "IPO_ANNOUNCE": 1,
+      "SESSION_OPEN": 1,
+      "AUCTION_RESULT": 1,
+      "IPO_OPEN": 1,
+      "CALENDAR_EVENT": 3,
+      "SSR_ON": 2,
+      "IPO_PRICED": 1,
+      "IPO_LISTED": 1,
+      "DIVIDEND": 1,
+      "UPGRADE_PURCHASED": 1,
+      "SESSION_CLOSED": 1
+    },
+    "symbols": [
+      "AAPL",
+      "AMD",
+      "AMZN",
+      "ARENA10",
+      "GOOGL",
+      "INTC",
+      "META",
+      "MSFT",
+      "NFLX",
+      "NVDA",
+      "ORCA",
+      "TSLA"
+    ],
+    "first_tick": 1541832,
+    "last_tick": 1544229,
+    "spread_bps_median": 2.911510866175381,
+    "spread_bps_p95": 20.733982998134234,
+    "absolute_move_bps_median": 0.0,
+    "absolute_move_bps_p95": 2.306582262951995,
+    "limitations": "Aggregated depth and public prints; no individual historical order/cancel IDs or reliable queue reconstruction.",
+    "sha256": "8b90295e4a70c91e6fe9b04d1189ce46898c7a8f6afb0967b7886b7c236d2685"
+  }
+]

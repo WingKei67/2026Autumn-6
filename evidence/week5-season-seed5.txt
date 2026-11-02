@@ -1,0 +1,74 @@
+
+──────────────────────────────────────────────────── WEEK 05 — Risk — breakers, stops and liquidation live ─────────────────────────────────────────────────────
+  week 5 · limit 800 · quota config · scoring ON · on: circuit_breakers, multi_venue, post_only_allowed, shorts_allowed · off: cancellation_fees, 
+futures_enabled, latency_enabled, purchase_window
+
+──────────────────────────────────────────────────────────────────────── WEEK 05 REPORT ────────────────────────────────────────────────────────────────────────
+  ticks 1,500   fills 1,037   shocks 3   seed 10
+
+─────────────────────────────────────────────────────────────────────────── WHO WINS ───────────────────────────────────────────────────────────────────────────
+  Most money          mm_passive (passive_mm) ended on $320,448, $13,779 ahead of the next bot — +4.04% return.
+  Best risk-adjusted  predictor_timing (shock_predictor) scores -0.077 vs -0.087 for the runner-up — max drawdown 2.5%. This is the season ranking.
+  Best on the shocks  mm_passive (passive_mm) made $15,232 over 3 shock windows, $2,506 better than the next bot.
+  Best market maker   mm_passive (passive_mm) survived on $320,448, $13,779 ahead of the next desk — 100% of its fills were passive.
+  6 of 9 bots beat doing nothing (+0.73%). Anything below that line lost to a buy-and-hold control.
+  One seed is one sample — re-run with 2-3 seeds before believing a close result.
+
+Final standings                                                                                                                   
+┏━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━┓
+┃ bot               ┃ preset           ┃ net worth ┃  return ┃ realized ┃   unreal ┃   fees ┃ rebates ┃   carry ┃ fills ┃ maker% ┃
+┡━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━╇━━━━━━━━┩
+│ mm_passive        │ passive_mm       │  $320,448 │  +4.04% │   $2,472 │  $16,662 │     $0 │  $1,265 │  $7,240 │   260 │   100% │
+│ mm_aggressive     │ aggressive_mm    │  $306,669 │  -0.44% │ $-16,303 │  $18,983 │    $97 │  $3,768 │  $6,977 │   791 │    98% │
+│ predictor_timing  │ shock_predictor  │  $172,654 │  +9.27% │  $15,102 │       $0 │   $828 │      $0 │     $61 │    88 │     0% │
+│ predictor_insider │ shock_predictor  │  $170,944 │  +8.18% │  $13,199 │       $0 │   $667 │      $0 │     $62 │    78 │     0% │
+│ noise_2           │ noise            │  $165,988 │  +5.05% │   $4,366 │   $4,462 │   $698 │      $0 │     $51 │   170 │     0% │
+│ momentum_1        │ momentum         │  $162,839 │  +3.05% │   $2,103 │   $3,669 │   $970 │      $0 │      $0 │   115 │     0% │
+│ noise_1           │ noise            │  $161,168 │  +2.00% │     $983 │   $3,046 │   $702 │      $0 │     $40 │   174 │     0% │
+│ control           │ control          │  $159,167 │  +0.73% │       $0 │     $887 │     $0 │      $0 │      $0 │     0 │     0% │
+│ reversion_1       │ mean_reversion   │  $158,679 │  +0.42% │     $431 │     $476 │   $416 │      $0 │     $22 │    72 │     0% │
+│ punter            │ leveraged_punter │   $77,892 │ -50.70% │  $-6,245 │ $-55,420 │ $3,173 │      $0 │ $14,196 │   326 │     0% │
+└───────────────────┴──────────────────┴───────────┴─────────┴──────────┴──────────┴────────┴─────────┴─────────┴───────┴────────┘
+  control (buy-and-hold) benchmark: +0.73% — beating this is the bar
+
+Broker survival                                                                              
+┏━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┓
+┃ broker        ┃ status ┃ net worth ┃ spread capture ┃ rebates ┃   fees ┃   carry ┃ maker% ┃
+┡━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━━━┩
+│ mm_passive    │ alive  │  $320,448 │         $2,472 │  $1,265 │     $0 │  $7,240 │   100% │
+│ mm_aggressive │ alive  │  $306,669 │       $-16,303 │  $3,768 │    $97 │  $6,977 │    98% │
+│ punter        │ alive  │   $77,892 │        $-6,245 │      $0 │ $3,173 │ $14,196 │     0% │
+└───────────────┴────────┴───────────┴────────────────┴─────────┴────────┴─────────┴────────┘
+
+Exchange  revenue $2,516  (taker fees $7,549 − maker rebates $5,033)
+
+Price quality  tick-to-tick |move| outside event windows:  median 0.005%   p95 0.026%   max 0.203% (NVDA @ t1206)   13,550 samples, 3 event windows excluded
+
+Shock attribution — net worth delta over                                                                                        
+┏━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┓
+┃ bot               ┃ preset           ┃ earnings NFLX -10% t300 ┃ earnings AMD +9% t750 ┃ econ_print MKT +5% t1050 ┃    total ┃
+┡━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━┩
+│ control           │ control          │                 $-1,492 │                  $227 │                   $2,232 │     $966 │
+│ mm_aggressive     │ aggressive_mm    │                $-21,429 │                 $-571 │                  $22,761 │     $761 │
+│ mm_passive        │ passive_mm       │                 $-7,133 │                  $861 │                  $21,505 │  $15,232 │
+│ momentum_1        │ momentum         │                 $-1,603 │                  $668 │                   $6,076 │   $5,141 │
+│ noise_1           │ noise            │                 $-2,930 │                  $785 │                   $6,060 │   $3,915 │
+│ noise_2           │ noise            │                  $1,364 │                  $295 │                   $6,212 │   $7,872 │
+│ predictor_insider │ shock_predictor  │                  $7,639 │                $3,048 │                   $1,632 │  $12,318 │
+│ predictor_timing  │ shock_predictor  │                  $6,087 │                $2,976 │                   $3,663 │  $12,726 │
+│ punter            │ leveraged_punter │                  $3,803 │               $-7,393 │                 $-49,297 │ $-52,886 │
+│ reversion_1       │ mean_reversion   │                   $-105 │                  $189 │                     $904 │     $988 │
+└───────────────────┴──────────────────┴─────────────────────────┴───────────────────────┴──────────────────────────┴──────────┘
+
+  Does predicting shocks pay?
+  window deltas are already net of fees, rebates and carry paid inside the window
+    predictor_insider      timing+direction          $12,318   (season fees $667)
+    predictor_timing       timing only               $12,726   (season fees $828)
+    (avg non-predictor)           $-2,711
+
+Order rejections (risk controls that bit)
+    INSUFFICIENT_CASH           3,398
+    SYMBOL_HALTED               1,183
+    POSITION_LIMIT                 32
+    POST_ONLY_CROSS                13
+    SSR_RESTRICTED                  5

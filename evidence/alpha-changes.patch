@@ -1,0 +1,2643 @@
+diff --git a/tests/conftest.py b/tests/conftest.py
+index 4c00e35..67b4e11 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -57,3 +57,10 @@ def _no_luld_band(monkeypatch):
+     import exchange.config as config
+     monkeypatch.setattr(config, "LULD_BAND_PCT", 0.0)
+     yield
++
++
++@pytest.fixture(autouse=True)
++def _isolate_team_ledger_state(monkeypatch, tmp_path):
++    """Never load a running seat's real ledger in an isolated bot test."""
++    import team.trader as team_trader
++    monkeypatch.setattr(team_trader, 'STATE_DIR', tmp_path / 'team_state')
+--- a/.gitignore
++++ b/.gitignore
+@@ -15,3 +15,7 @@
+ 
+ .venv310/
+ .venv311/
++
++# Offline alpha report caches (results and charts remain reviewable)
++alpha_results/**/mpl_cache/
++alpha_results/**/runner.pid
+diff --git a/team/alpha/__init__.py b/team/alpha/__init__.py
+new file mode 100644
+index 0000000..e85ac24
+--- /dev/null
++++ b/team/alpha/__init__.py
+@@ -0,0 +1,8 @@
++"""Offline-testable alpha components; importing never starts a live bot."""
++from .event_momentum import EventMomentum
++from .post_halt import PostHaltReversion
++from .market_making import AdaptiveMarketMaker
++from .basket import BasketArbitrage
++
++STRATEGIES = {'event_momentum': EventMomentum, 'post_halt': PostHaltReversion,
++              'market_making': AdaptiveMarketMaker, 'basket': BasketArbitrage}
+diff --git a/team/alpha/basket.py b/team/alpha/basket.py
+new file mode 100644
+index 0000000..09d06a0
+--- /dev/null
++++ b/team/alpha/basket.py
+@@ -0,0 +1,53 @@
++"""Rolling residual trade against the tradable ARENA10 future; never a fictitious index fill."""
++import math
++from statistics import mean, pstdev
++from .core import Strategy
++
++
++class BasketArbitrage(Strategy):
++    def __init__(self,z=2.5,rolling_beta=True,hedge=True,lookback=90):
++        super().__init__(z=z,rolling_beta=rolling_beta,hedge=hedge,lookback=lookback)
++        self.z=z; self.rolling_beta=rolling_beta; self.hedge=hedge; self.lookback=lookback
++        self.active=None
++
++    def decide(self,obs):
++        if obs.tick%5: return []
++        if not obs.futures_enabled or not self.eligible(obs,'ARENA10'): return []
++        if self.active:
++            sym,base,hedgebase,tick,group=self.active
++            if obs.tick-tick>=40:
++                orders=self.cross(obs,sym,base,'basket_exit',group+':exit')+self.cross(obs,'ARENA10',hedgebase,'hedge_exit',group+':exit')
++                if obs.positions.get(sym,0)==base and obs.positions.get('ARENA10',0)==hedgebase: self.active=None
++                return orders
++            return []
++        index=list(self.history['ARENA10'])[-self.lookback:]
++        if len(index)<self.lookback: return []
++        x=[math.log(p) for _,p in index]
++        dx=[b-a for a,b in zip(x,x[1:])]; variance=pstdev(dx)**2
++        if variance<1e-12: return []
++        for sym,q in obs.quotes.items():
++            if sym=='ARENA10' or not self.eligible(obs,sym): continue
++            news=self.news.get(sym)
++            if news and news[1]=='earnings' and obs.tick-news[0]<150: continue
++            prices=list(self.history[sym])[-self.lookback:]
++            if len(prices)!=len(index) or [t for t,_ in prices]!=[t for t,_ in index]: continue
++            y=[math.log(p) for _,p in prices]; dy=[b-a for a,b in zip(y,y[1:])]
++            mx,my=mean(dx),mean(dy)
++            beta=sum((a-mx)*(b-my) for a,b in zip(dx,dy))/len(dx)/variance if self.rolling_beta else 1.
++            beta=max(.2,min(3.,beta))
++            residuals=[b-beta*a for a,b in zip(x,y)]
++            scale=max(pstdev(residuals),.001)
++            residual=math.log(q.mid)-beta*math.log(obs.quotes['ARENA10'].mid)
++            displacement=residual-mean(residuals); z=displacement/scale
++            costs=(2*obs.taker_fee+q.spread)*(1+beta)+.004
++            if abs(z)<self.z or abs(displacement)<=costs: continue
++            direction=1 if z<0 else -1; base=obs.positions.get(sym,0)
++            qty=3 if direction>0 else min(3,base)
++            if not qty: continue
++            hedge_qty=max(1,round(beta*qty*q.mid/obs.quotes['ARENA10'].mid))
++            hedgebase=obs.positions.get('ARENA10',0); group=f'basket:{sym}:{obs.tick}'
++            self.active=(sym,base,hedgebase,obs.tick,group)
++            orders=self.cross(obs,sym,base+direction*qty,'basket_entry',group)
++            if self.hedge: orders+=self.cross(obs,'ARENA10',hedgebase-direction*hedge_qty,'hedge_entry',group)
++            return orders
++        return []
+diff --git a/team/alpha/core.py b/team/alpha/core.py
+new file mode 100644
+index 0000000..fffa88e
+--- /dev/null
++++ b/team/alpha/core.py
+@@ -0,0 +1,166 @@
++"""Causal strategy API. No engine handles, future paths or private event parameters."""
++from collections import defaultdict, deque
++from dataclasses import dataclass, field
++import math
++from statistics import mean, pstdev
++
++
++@dataclass(frozen=True)
++class Quote:
++    bid: float
++    ask: float
++    bid_size: int
++    ask_size: int
++
++    @property
++    def mid(self): return (self.bid + self.ask) / 2
++    @property
++    def spread(self): return (self.ask - self.bid) / self.mid
++    @property
++    def imbalance(self): return (self.bid_size - self.ask_size) / max(1, self.bid_size + self.ask_size)
++    @property
++    def microprice(self):
++        return (self.bid * self.ask_size + self.ask * self.bid_size) / max(1, self.bid_size + self.ask_size)
++
++
++@dataclass(frozen=True)
++class PublicEvent:
++    event: str
++    tick: int
++    symbols: tuple = ()
++    kind: str = ''
++
++
++@dataclass(frozen=True)
++class Observation:
++    tick: int
++    quotes: dict
++    positions: dict
++    cash: float
++    equity: float
++    initial_cash: float
++    halted: frozenset = frozenset()
++    market_halted: bool = False
++    session_open: bool = True
++    events: tuple = ()
++    taker_fee: float = .003
++    maker_rebate: float = .001
++    futures_enabled: bool = False
++    cap: int = 150
++
++
++@dataclass(frozen=True)
++class Intent:
++    symbol: str
++    side: str
++    quantity: int
++    price: float
++    order_type: str = 'ioc'
++    cancel: bool = False
++    group: str = ''
++    reason: str = ''
++
++
++class Strategy:
++    def __init__(self, **params):
++        self.params = params
++        self.history = defaultdict(lambda: deque(maxlen=600))
++        self.news = {}
++        self.event_tick = {}
++        self.resumed = {}
++        self.halt_reference = {}
++
++    def on_events(self, obs):
++        for event in obs.events:
++            if event.event == 'CALENDAR_EVENT':
++                for sym in event.symbols:
++                    self.news[sym] = (event.tick, event.kind)
++                    self.event_tick[sym] = event.tick
++            elif event.event == 'TRADING_HALT':
++                for sym in event.symbols:
++                    # Captured BEFORE the halt tick's quote enters history.
++                    h = list(self.history[sym])
++                    self.halt_reference[sym] = h[-90:-5] if len(h) >= 35 else []
++            elif event.event == 'TRADING_RESUMED':
++                for sym in event.symbols: self.resumed[sym] = event.tick
++
++    def observe(self, obs):
++        self.on_events(obs)
++        result = self.decide(obs)
++        for sym, q in obs.quotes.items():
++            self.history[sym].append((obs.tick, q.mid))
++        return result
++
++    def decide(self, obs): return []
++
++    @staticmethod
++    def eligible(obs, sym):
++        return (obs.session_open and not obs.market_halted and sym not in obs.halted
++                and sym in obs.quotes and obs.quotes[sym].bid > 0
++                and obs.quotes[sym].ask > obs.quotes[sym].bid)
++
++    def volatility(self, sym, n=30):
++        p = [p for _, p in list(self.history[sym])[-n-1:]]
++        return pstdev([math.log(b/a) for a,b in zip(p,p[1:])]) if len(p) > 3 else 0.
++
++    @staticmethod
++    def cross(obs, sym, target, reason='', group=''):
++        if sym not in obs.quotes: return []
++        delta = int(target - obs.positions.get(sym, 0))
++        if not delta: return []
++        q = obs.quotes[sym]; side = 'buy' if delta > 0 else 'sell'
++        # Fixed, observed limit: never reprice to a future quote at execution.
++        price = q.ask * 1.001 if delta > 0 else q.bid * .999
++        return [Intent(sym, side, abs(delta), round(price,2), reason=reason, group=group)]
++
++
++@dataclass
++class Plan:
++    base: int
++    target: int
++    created: int
++    entry: float
++    started: int = 0
++    best: float = 0.
++    exiting: bool = False
++
++
++class PositionStrategy(Strategy):
++    def __init__(self, **params):
++        super().__init__(**params)
++        self.plans = {}
++        self.last_entry = {}
++
++    def manage(self, obs, holding=60, trailing=3., use_trailing=True):
++        orders = []
++        for sym, plan in list(self.plans.items()):
++            if not self.eligible(obs, sym): continue
++            pos = obs.positions.get(sym,0); q = obs.quotes[sym]
++            sign = 1 if plan.target > plan.base else -1
++            if not plan.started:
++                if pos == plan.base and obs.tick - plan.created > 6:
++                    del self.plans[sym]
++                    continue
++                if pos != plan.base:
++                    plan.started = obs.tick; plan.entry = q.mid; plan.best = q.mid
++            if plan.started:
++                plan.best = max(plan.best,q.mid) if sign > 0 else min(plan.best,q.mid)
++                stop = max(.004, min(.02, trailing * self.volatility(sym) * math.sqrt(10)))
++                draw = sign * (q.mid / plan.best - 1)
++                loss = sign * (q.mid / plan.entry - 1)
++                if ((use_trailing and draw < -stop) or loss < -.015
++                        or obs.tick - plan.started >= holding): plan.exiting = True
++            target = plan.base if plan.exiting else plan.target
++            if plan.exiting and pos == target:
++                del self.plans[sym]
++                continue
++            orders += self.cross(obs,sym,target,'exit' if plan.exiting else 'entry')
++        return orders
++
++    def enter(self, obs, sym, direction, lot=8):
++        base = obs.positions.get(sym,0)
++        target = min(obs.cap, base + lot) if direction > 0 else max(0,base-lot)
++        if target == base: return []
++        self.plans[sym] = Plan(base,target,obs.tick,obs.quotes[sym].mid)
++        self.last_entry[sym] = obs.tick
++        return self.cross(obs,sym,target,'entry')
+diff --git a/team/alpha/event_momentum.py b/team/alpha/event_momentum.py
+new file mode 100644
+index 0000000..b9c8762
+--- /dev/null
++++ b/team/alpha/event_momentum.py
+@@ -0,0 +1,36 @@
++"""Post-publication momentum; direction comes exclusively from observed prices."""
++from dataclasses import replace
++from .core import PositionStrategy
++
++
++class EventMomentum(PositionStrategy):
++    def __init__(self, confirmation=5, holding=40, trailing=3., fee_gate=True, use_trailing=True):
++        super().__init__(confirmation=confirmation, holding=holding, trailing=trailing,
++                         fee_gate=fee_gate, use_trailing=use_trailing)
++        self.confirmation=confirmation; self.holding=holding; self.trailing=trailing
++        self.fee_gate=fee_gate; self.use_trailing=use_trailing
++        self.answered=set()
++
++    def decide(self, obs):
++        orders=self.manage(obs,self.holding,self.trailing,self.use_trailing)
++        for sym,tick in self.event_tick.items():
++            if not self.eligible(obs,sym) or sym in self.plans or (sym,tick) in self.answered: continue
++            # History includes only quotes observed BEFORE this decision.
++            after=[p for t,p in self.history[sym] if t >= tick]
++            age=obs.tick-tick
++            if age < self.confirmation or len(after) < self.confirmation: continue
++            if age > self.confirmation + 4: continue  # never chase a five-minute-old release
++            q=obs.quotes[sym]
++            move=q.mid/after[0]-1
++            # Persistence estimate, not the announced pct or eventual target.
++            expected=abs(move)*min(2.,self.holding/max(1,self.confirmation))
++            slippage_budget=min(.012,max(.001,abs(move)/max(1,self.confirmation)*1.5))
++            costs=2*obs.taker_fee + q.spread + slippage_budget + .001 + .001
++            if self.fee_gate and expected <= costs: continue
++            if abs(move) < .001: continue
++            self.answered.add((sym,tick))
++            entry=self.enter(obs,sym,1 if move > 0 else -1)
++            for intent in entry:
++                price=q.ask*(1+slippage_budget) if intent.side=="buy" else q.bid*(1-slippage_budget)
++                orders.append(replace(intent,price=round(price,2)))
++        return orders
+diff --git a/team/alpha/market_making.py b/team/alpha/market_making.py
+new file mode 100644
+index 0000000..52f1593
+--- /dev/null
++++ b/team/alpha/market_making.py
+@@ -0,0 +1,38 @@
++"""Post-only microprice quotes with volatility/toxicity protection and inventory skew."""
++import math
++from .core import Intent, Strategy
++
++
++class AdaptiveMarketMaker(Strategy):
++    def __init__(self, width=1.5, skew=1., adverse=True, micro=True, cooldown=45):
++        super().__init__(width=width,skew=skew,adverse=adverse,micro=micro,cooldown=cooldown)
++        self.width=width; self.skew=skew; self.adverse=adverse; self.micro=micro; self.cooldown=cooldown
++
++    def decide(self,obs):
++        orders=[]
++        if obs.tick%4: return orders
++        for sym,q in obs.quotes.items():
++            if sym=='ARENA10': continue
++            news=self.news.get(sym)
++            vol=self.volatility(sym)
++            blocked=(not self.eligible(obs,sym) or (self.adverse and
++                (vol>.003 or (news and obs.tick-news[0]<self.cooldown))))
++            if obs.tick%4: continue
++            # Explicit cancel request; the executor waits for actual cancellation.
++            orders.append(Intent(sym,'buy',0,0,cancel=True))
++            if blocked: continue
++            h=[p for _,p in list(self.history[sym])[-6:]]
++            trend=(q.mid/h[0]-1) if len(h)>4 else 0.
++            micro=q.microprice if self.micro else q.mid
++            fair=.5*q.mid+.5*micro + q.mid*max(-.001,min(.001,trend*.2))
++            fair += .1*q.imbalance*(q.ask-q.bid)
++            half=max(.01,q.mid*.0005,self.width*(q.ask-q.bid)/2)
++            if self.adverse: half=max(half,q.mid*(2*vol+abs(trend)*.3))
++            pos=obs.positions.get(sym,0); cap=min(20,obs.cap)
++            fair-=self.skew*(pos/max(1,cap)-.5)*half*1.5
++            size=max(1,min(3,int(3/(1+1000*vol))))
++            bid=math.floor(min(fair-half,q.ask-.01)*100)/100
++            ask=math.ceil(max(fair+half,q.bid+.01)*100)/100
++            if pos<cap: orders.append(Intent(sym,'buy',min(size,cap-pos),bid,'post_only'))
++            if pos>0: orders.append(Intent(sym,'sell',min(size,pos),ask,'post_only'))
++        return orders
+diff --git a/team/alpha/post_halt.py b/team/alpha/post_halt.py
+new file mode 100644
+index 0000000..97dd3b0
+--- /dev/null
++++ b/team/alpha/post_halt.py
+@@ -0,0 +1,32 @@
++"""Fade confirmed transient dislocations; exclude recent permanent earnings news."""
++from statistics import mean, pstdev
++from .core import PositionStrategy
++
++
++class PostHaltReversion(PositionStrategy):
++    def __init__(self, z=3., reversal=True, earnings_filter=True):
++        super().__init__(z=z,reversal=reversal,earnings_filter=earnings_filter)
++        self.z=z; self.reversal=reversal; self.earnings_filter=earnings_filter
++        self.used=set()
++
++    def decide(self,obs):
++        orders=self.manage(obs,40,2.)
++        for sym,tick in self.resumed.items():
++            if (sym,tick) in self.used or sym in self.plans or not self.eligible(obs,sym): continue
++            if not 3 <= obs.tick-tick <= 25: continue
++            news=self.news.get(sym)
++            if self.earnings_filter and news and news[1]=='earnings' and obs.tick-news[0] < 650: continue
++            # A strictly lagged pre-halt reference, never recomputed using the recovery.
++            ref=[p for _,p in self.halt_reference.get(sym,[])]
++            if len(ref)<30: continue
++            center=mean(ref); scale=max(pstdev(ref),center*.001)
++            p=obs.quotes[sym].mid; z=(p-center)/scale
++            h=[v for _,v in list(self.history[sym])[-3:]]
++            if len(h)<3: continue
++            reversal=(p>h[-1]>h[-2] if z<0 else p<h[-1]<h[-2])
++            if abs(z)<self.z or (self.reversal and not reversal): continue
++            expected=abs(p-center)/p
++            if expected <= 2*obs.taker_fee+obs.quotes[sym].spread+.003: continue
++            self.used.add((sym,tick))
++            orders += self.enter(obs,sym,1 if z<0 else -1,lot=5)
++        return orders
+diff --git a/alpha_lab/__init__.py b/alpha_lab/__init__.py
+new file mode 100644
+index 0000000..258673c
+--- /dev/null
++++ b/alpha_lab/__init__.py
+@@ -0,0 +1 @@
++"""Isolated offline exchange experiments. No socket or hosted order path."""
+diff --git a/alpha_lab/baselines.py b/alpha_lab/baselines.py
+new file mode 100644
+index 0000000..2bac1cc
+--- /dev/null
++++ b/alpha_lab/baselines.py
+@@ -0,0 +1,57 @@
++"""The original MyTrader is executed, not replaced by a preset proxy."""
++from team.alpha.core import Strategy
++
++
++class NoTrade(Strategy): pass
++
++
++class BuyHold(Strategy):
++    def __init__(self): super().__init__(); self.targets={}
++    def decide(self,obs):
++        if not self.targets:
++            syms=[s for s in obs.quotes if s!='ARENA10']
++            if not syms:return []
++            self.targets={s:min(obs.cap,int(.30*obs.initial_cash/len(syms)/obs.quotes[s].ask)) for s in syms}
++        orders=[]
++        for s,target in self.targets.items():
++            if self.eligible(obs,s):orders+=self.cross(obs,s,target,'buy_and_hold')
++        return orders
++
++
++class Original:
++    """Actual Week 5 strategy AND its final outbound risk method, no live run()."""
++    def __init__(self,account,path,server):
++        import trader.config as cfg
++        from team.trader import MyTrader,_Bot
++        from team.ledger import Ledger
++        cfg.TEAM_ID=account
++        self.owner=MyTrader(); self.bot=_Bot(self.owner)
++        self.bot._state_path=path
++        self.bot.ledger=Ledger()
++        self.server=server; self.collected=[]
++        async def capture(msg):
++            from team.alpha.core import Intent
++            from shared.messages import PlaceOrder
++            if isinstance(msg,PlaceOrder):
++                self.collected.append(Intent(msg.symbol,msg.side,msg.quantity,msg.price,msg.order_type))
++        self.bot._send=capture
++
++    async def observe_async(self,obs,raw_events,pending):
++        self.owner.now=lambda: float(obs.tick)
++        # Live handshakes advertise fees, including fee-stress experiments.
++        self.owner.on_event("FEE_SCHEDULE","",{"taker":obs.taker_fee,"rebate":obs.maker_rebate})
++        self.owner._refs.update(self.server.ref_prices) # refs are publicly broadcast
++        self.bot._session_open=obs.session_open
++        self.owner._week5_active=self.server.scenario.week==5
++        self.bot._on_portfolio(self.server.portfolios[self.bot.portfolio.team_id].to_message(self.server.ref_prices))
++        if not pending:self.owner._inflight.clear()
++        for event in raw_events:
++            await self.bot._on_session_event(event)
++        for sym in self.server.books:
++            self.bot.market.update_book(self.server._make_snapshot(sym,self.server.books[sym]))
++        signal=self.owner.on_tick(self.bot.market,self.bot.portfolio)
++        self.collected=[]
++        if signal:await self.bot._place_order(signal)
++        return self.collected
++
++    def on_fill(self,msg): self.bot._on_trade(msg)
+diff --git a/alpha_lab/data.py b/alpha_lab/data.py
+new file mode 100644
+index 0000000..28b0435
+--- /dev/null
++++ b/alpha_lab/data.py
+@@ -0,0 +1,51 @@
++"""Credential-free inventory and aggregated historical market observations."""
++from collections import Counter, defaultdict
++import gzip
++import json
++from pathlib import Path
++from statistics import median
++
++
++def recording_paths(root):
++    paths=[]
++    for p in sorted(Path(root).glob('session*')):
++        if p.suffix=='.jsonl' or (p.name.endswith('.jsonl.gz') and not Path(str(p)[:-3]).exists()): paths.append(p)
++    return paths
++
++
++def rows(path):
++    opener=gzip.open if str(path).endswith('.gz') else open
++    with opener(path,'rt') as f:
++        for line in f:
++            try: yield json.loads(line)
++            except (ValueError,TypeError): continue
++
++
++def inventory(root):
++    result=[]
++    for p in recording_paths(root):
++        types=Counter(); events=Counter(); spreads=[]; symbols=set(); ticks=[]; last={}; moves=[]
++        n=0
++        for row in rows(p):
++            n+=1; msg=row.get('msg',row)
++            if not isinstance(msg,dict): continue
++            kind=msg.get('type','unknown'); types[kind]+=1
++            if kind=='session_event': events[msg.get('event','unknown')]+=1
++            if kind=='book_snapshot':
++                sym=msg.get('symbol'); symbols.add(sym)
++                t=row.get('tick',0); ticks.append(t)
++                mid=msg.get('mid_price')
++                if mid and mid>0:
++                    if msg.get('spread') is not None: spreads.append(msg['spread']/mid*10000)
++                    if sym in last and t!=last[sym][0]: moves.append(abs(mid/last[sym][1]-1)*10000)
++                    last[sym]=(t,mid)
++        def q(values,p):
++            if not values:return None
++            ordered=sorted(values);return ordered[min(len(ordered)-1,int(p*len(ordered)))]
++        result.append({'file':str(p),'rows':n,'types':dict(types),'events':dict(events),
++            'symbols':sorted(s for s in symbols if s),'first_tick':min(ticks) if ticks else None,
++            'last_tick':max(ticks) if ticks else None,'spread_bps_median':median(spreads) if spreads else None,
++            'spread_bps_p95':q(spreads,.95),'absolute_move_bps_median':median(moves) if moves else None,
++            'absolute_move_bps_p95':q(moves,.95),
++            'limitations':('Includes partial order events, but incoming order semantics and complete queue history are not guaranteed.' if types['order_ack'] else 'Aggregated depth and public prints; no individual historical order/cancel IDs or reliable queue reconstruction.')})
++    return result
+diff --git a/alpha_lab/exchange.py b/alpha_lab/exchange.py
+new file mode 100644
+index 0000000..ad09375
+--- /dev/null
++++ b/alpha_lab/exchange.py
+@@ -0,0 +1,109 @@
++"""Real exchange, with deterministic transport/timers instead of wall-clock tasks.
++
++Matching, portfolio accounting, risk checks, quotas, carry, futures settlement,
++calendar, price impact and auctions are inherited unchanged. Only outbound
++transport and asynchronous halt timers are replaced with a virtual tick clock.
++"""
++from dataclasses import dataclass
++from collections import defaultdict
++import math
++
++from exchange.server import ExchangeServer
++from shared.messages import SessionEvent, TradeExecution, OrderAck, ErrorMsg
++
++
++class OfflineExchange(ExchangeServer):
++    def __init__(self):
++        super().__init__()
++        self.receivers={}
++        self.timers=[]
++        self.wire_events=[]
++        self.transcript=[]
++
++    async def _send(self, websocket, message):
++        if websocket in self.receivers: self.receivers[websocket](message)
++
++    async def _broadcast(self, message, skip_ids=None):
++        if isinstance(message,SessionEvent):
++            self.wire_events.append(message)
++            for name in self.receivers:
++                self.receivers[name](message)
++
++    async def _broadcast_ladder(self,*args,**kwargs): return
++    async def _push_queue_updates(self,*args,**kwargs): return
++
++    async def _halt_symbol(self,symbol,reason,duration=None):
++        record=self.circuit_breaker.halt_symbol(symbol,reason,duration)
++        self.timers.append((self.tick+math.ceil(record['duration']),'symbol',symbol))
++        await self._broadcast(SessionEvent(event='TRADING_HALT',message=reason,
++            data={'symbol':symbol,'duration':record['duration'],'resume_at':record['resume_at']}))
++
++    async def _halt_all_symbols(self,reason,level):
++        if level==3:
++            await self.close_session(); return
++        duration=self.circuit_breaker.HALT_DURATION_SEC*({1:3,2:12}.get(level,1))
++        self.circuit_breaker.market_halted=True
++        self.timers.append((self.tick+math.ceil(duration),'market',level))
++        await self._broadcast(SessionEvent(event='MARKET_HALT',message=reason,
++            data={'level':level,'duration':duration}))
++
++    async def resume_due(self):
++        due=[x for x in self.timers if x[0]<=self.tick]
++        self.timers=[x for x in self.timers if x[0]>self.tick]
++        for _,kind,value in due:
++            if kind=='symbol' and self.circuit_breaker.resume_symbol(value):
++                await self._broadcast(SessionEvent(event='TRADING_RESUMED',message='virtual-clock resume',data={'symbol':value}))
++            elif kind=='market':
++                self.circuit_breaker.market_halted=False
++                await self._broadcast(SessionEvent(event='MARKET_RESUMED',message='virtual-clock resume',data={'level':value}))
++
++
++@dataclass
++class Reservation:
++    symbol: str
++    side: str
++    quantity: int
++    price: float
++    kind: str
++    oid: str = ''
++    group: str = ''
++    decision_tick: int = 0
++    decision_mid: float = 0.
++    due: int = 0
++
++
++class Receiver:
++    def __init__(self,account):
++        self.account=account
++        self.pending={}
++        self.events=[]
++        self.fills=[]
++        self.errors=defaultdict(int)
++        self.current=None
++        self.positions_seen={}
++        self.halt_orders=0
++        self.group_fills=defaultdict(int)
++        self.group_initial={}
++
++    def __call__(self,msg):
++        if isinstance(msg,SessionEvent): self.events.append(msg)
++        elif isinstance(msg,OrderAck):
++            entry=self.pending.get((msg.symbol,msg.side))
++            if entry: entry.oid=msg.order_id
++        elif isinstance(msg,ErrorMsg): self.errors[msg.code]+=1
++        elif isinstance(msg,TradeExecution):
++            if self.account not in (msg.buyer_id,msg.seller_id): return
++            side='buy' if msg.buyer_id==self.account else 'sell'
++            entry=self.pending.get((msg.symbol,side))
++            qty=msg.quantity
++            fee=msg.fee if msg.taker_id==self.account else 0.
++            rebate=msg.maker_rebate if msg.maker_id==self.account else 0.
++            if entry:
++                entry.quantity=max(0,entry.quantity-qty)
++                if entry.group: self.group_fills[(entry.group,entry.symbol)]+=qty
++            self.fills.append({'tick':self.current.tick if self.current else 0,'symbol':msg.symbol,
++                'side':side,'quantity':qty,'price':msg.price,'fee':fee,'rebate':rebate,
++                'maker':msg.maker_id==self.account,
++                'decision_tick':entry.decision_tick if entry else None,
++                'decision_mid':entry.decision_mid if entry else None,
++                'group':entry.group if entry else ''})
+diff --git a/alpha_lab/experiment.py b/alpha_lab/experiment.py
+new file mode 100644
+index 0000000..39859fb
+--- /dev/null
++++ b/alpha_lab/experiment.py
+@@ -0,0 +1,119 @@
++"""Preregistered calibration, held-out seed evaluation, sensitivities and ablations."""
++import asyncio
++from concurrent.futures import ProcessPoolExecutor, as_completed
++import csv
++from dataclasses import dataclass
++from itertools import product
++import json
++import math
++from pathlib import Path
++from statistics import mean, stdev
++import time
++import hashlib
++
++from .runner import run_one, default_cash
++
++
++@dataclass(frozen=True)
++class Candidate:
++    name:str
++    params:dict
++    label:str=''
++
++    @property
++    def key(self):
++        return self.label or self.name+':'+json.dumps(self.params,sort_keys=True,separators=(',',':'))
++
++
++def grids():
++    candidates=[]
++    for c,h,t in product((3,5,10,15),(20,40,60,120),(2.,4.)):
++        candidates.append(Candidate('event_momentum',{'confirmation':c,'holding':h,'trailing':t}))
++    for z in (2.5,3.,3.5,4.):candidates.append(Candidate('post_halt',{'z':z}))
++    for width,skew in product((1.,1.5,2.5),(.5,1.5)):
++        candidates.append(Candidate('market_making',{'width':width,'skew':skew}))
++    for z,lookback in product((2.,2.5,3.,3.5),(60,120)):
++        candidates.append(Candidate('basket',{'z':z,'lookback':lookback}))
++    return candidates
++
++
++def job(payload):
++    seed,candidates,ticks,week,cash,stress=payload
++    async def execute():
++        result=[]
++        for candidate in candidates:
++            components=candidate.get('components') or [(candidate['name'],candidate['params'])]
++            row=await run_one(seed,components,ticks=ticks,week=week,cash=cash,stress=stress)
++            row['candidate']=candidate['key'];row['strategy']=candidate['name']
++            result.append(row)
++        return result
++    return asyncio.run(execute())
++
++
++def spec(c):return {'name':c.name,'params':c.params,'key':c.key}
++
++
++def run_batch(seeds,candidates,ticks,week,cash,stress,workers,description):
++    results=[];start=time.monotonic()
++    payloads=[(seed,candidates,ticks,week,cash,stress) for seed in seeds]
++    with ProcessPoolExecutor(max_workers=workers) as pool:
++        futures={pool.submit(job,p):p[0] for p in payloads}
++        for i,f in enumerate(as_completed(futures),1):
++            try:results.extend(f.result())
++            except Exception as exc:raise RuntimeError(f'{description}: seed {futures[f]} failed') from exc
++            if i==1 or i%5==0 or i==len(payloads):
++                print(f'{description}: seeds {i}/{len(seeds)}, runs {len(results)}, elapsed {time.monotonic()-start:.1f}s',flush=True)
++    return sorted(results,key=lambda r:(r['seed'],r['candidate']))
++
++
++def save_rows(path,rows):
++    path=Path(path)
++    path.with_suffix('.json').write_text(json.dumps(rows,indent=2,allow_nan=False))
++    if not rows:return
++    keys=sorted(set().union(*(row.keys() for row in rows)))
++    with path.with_suffix('.csv').open('w',newline='') as f:
++        writer=csv.DictWriter(f,fieldnames=keys);writer.writeheader()
++        for row in rows:writer.writerow({k:json.dumps(v,sort_keys=True) if isinstance(v,(dict,list,tuple)) else v for k,v in row.items()})
++
++
++def select(calibration):
++    by={}
++    baseline={(r['seed'],r['week']):r['pnl'] for r in calibration if r['strategy']=='no_trade'}
++    for row in calibration:
++        if row['strategy'] in ('no_trade','buy_hold','original'):continue
++        key=row['candidate'];by.setdefault(key,[]).append(row)
++    sensitivity=[]
++    for key,rows in by.items():
++        excess=[r['pnl']-baseline[(r['seed'],r['week'])] for r in rows]
++        avg=mean(excess);sigma=stdev(excess) if len(excess)>1 else 0
++        failures=sum(r['liquidations']+r['position_violations']+r['team_position_violations'] for r in rows)
++        # Frozen risk-adjusted calibration score; never rank parameters on OOS.
++        score=avg-.5*sigma-1e9*failures
++        sensitivity.append({'candidate':key,'strategy':rows[0]['strategy'],'params':rows[0]['components'][0][1],
++            'week':rows[0]['week'],'mean_pnl':mean(r['pnl'] for r in rows),
++            'mean_excess_no_trade':avg,'std_excess':sigma,'selection_score':score,'failures':failures,
++            'mean_fills':mean(r['fills'] for r in rows),'n':len(rows)})
++    chosen={}
++    for row in sorted(sensitivity,key=lambda r:(-r['selection_score'],r['candidate'])):
++        chosen.setdefault(row['strategy'],row)
++    return chosen,sensitivity
++
++
++def ablations(chosen):
++    variants=[]
++    for name,patch,label in [('event_momentum',{'fee_gate':False},'no_fee_gate'),
++        ('event_momentum',{'use_trailing':False},'no_trailing'),
++        ('post_halt',{'reversal':False},'no_reversal'),('post_halt',{'earnings_filter':False},'no_earnings_filter'),
++        ('market_making',{'micro':False},'no_microprice'),('market_making',{'adverse':False},'no_adverse_filter'),
++        ('market_making',{'skew':0.},'no_inventory_skew'),('basket',{'rolling_beta':False},'fixed_beta'),
++        ('basket',{'hedge':False},'unhedged')]:
++        params={**chosen[name]['params'],**patch}
++        variants.append(spec(Candidate(name,params,name+':ablation:'+label)))
++    return variants
++
++
++def source_hashes(root):
++    paths=list((Path(root)/'team/alpha').glob('*.py'))+list((Path(root)/'alpha_lab').glob('*.py'))
++    for folder in ('engine/exchange','engine/shared','engine/plugins/securities'):
++        paths.extend((Path(root)/folder).glob('*.py'))
++    return {str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(paths)}
+diff --git a/alpha_lab/history.py b/alpha_lab/history.py
+new file mode 100644
+index 0000000..9fb8f49
+--- /dev/null
++++ b/alpha_lab/history.py
+@@ -0,0 +1,130 @@
++"""Secondary chronological historical taker replay through the real exchange.
++
++This is NOT exact historical counterfactual simulation. Only aggregated books
++are known. We reconstruct at most three levels, cap participation at 10% of
++visible touch, and execute prior-tick decisions on a later observed book.
++No maker fill estimates are published: historical queue position is unknown.
++The main seeded experiments model queues independently using real order IDs.
++"""
++from collections import defaultdict
++import asyncio
++import json
++from pathlib import Path
++
++from exchange.server import Portfolio
++from exchange.calendar import MarketCalendar
++from shared.messages import PlaceOrder,CancelOrder,SessionEvent
++from team.alpha import STRATEGIES
++from team.alpha.core import Observation,Intent,Strategy
++from .runner import isolated,public_events,default_cash
++from .exchange import OfflineExchange,Receiver
++from .risk import Gateway
++from .baselines import NoTrade, BuyHold, Original
++BASELINES={"no_trade":NoTrade,"buy_hold":BuyHold}
++from .metrics import summarize
++from .data import rows,recording_paths
++
++
++def frames(path):
++    buckets=defaultdict(lambda:{'books':{},'events':[]})
++    for row in rows(path):
++        msg=row.get('msg',row);tick=row.get('tick')
++        if not isinstance(msg,dict) or tick is None:continue
++        if msg.get('type')=='book_snapshot':buckets[tick]['books'][msg['symbol']]=msg
++        elif msg.get('type')=='session_event':buckets[tick]['events'].append(msg)
++    return sorted(buckets.items())
++
++
++async def run_history(path,name,params,cash=None):
++    cash=default_cash() if cash is None else cash
++    week=int(Path(path).name.split('week')[1][:2]);tape=frames(path)
++    if not tape:raise ValueError('No historical book frames')
++    with isolated(0,week,cash,1) as (tmp,scenario,accounts):
++        scenario.events=[];s=OfflineExchange();s.set_scenario(scenario);s.calendar=MarketCalendar([])
++        s.session_open=True;s.auction_phase=None
++        a=accounts[0];s.clients[a]=a
++        s.portfolios[a]=Portfolio(team_id=a,role='trader',level=1,cash=cash)
++        for sym in s.books:
++            provider='liquidity_'+sym
++            s.portfolios[provider]=Portfolio(team_id=provider,role='broker',level=1,cash=1e9)
++        rx=Receiver(a);rx.current=s;s.receivers[a]=rx
++        g=Gateway(s,a,rx,cash,150,1)
++        strategy=Original(a,tmp/'history.json',s) if name=='original' else BASELINES[name]() if name in BASELINES else STRATEGIES[name](**params)
++        latest={};starting=None;curve=[];initial=None;first=tape[0][0]
++        for absolute,data in tape:
++            s.tick=absolute-first+1;s._refill_quotas()
++            for sym,msg in data['books'].items():
++                if sym not in s.books or sym=='ARENA10':continue
++                latest[sym]=msg
++                ref=float(msg.get('ref_price') or msg.get('mid_price') or s.ref_prices[sym])
++                if ref<=0:continue
++                s.ref_prices[sym]=ref
++                if sym in s.price_engines:
++                    engine=s.price_engines[sym];engine.fair_value=engine.market_price=ref;engine.impact_buffer=0
++                account='liquidity_'+sym
++                for oid,e in list(s.books[sym]._orders.items()):
++                    if e.team_id==account:
++                        await s._handle_cancel_order(account,CancelOrder(team_id=account,symbol=sym,order_id=oid),account)
++                for side,key in [('buy','bids'),('sell','asks')]:
++                    for price,quantity in msg.get(key,[])[:3]:
++                        if price<=0:continue
++                        # Submit displayed liquidity via the actual engine, not a fill shortcut.
++                        qty=min(500,int(quantity))
++                        if qty>0:await s._handle_place_order(account,PlaceOrder(team_id=account,symbol=sym,
++                            side=side,quantity=qty,price=price,order_type='limit'),account)
++            for msg in data['events']:
++                event=SessionEvent.model_validate(msg);d=event.data or {}
++                if event.event=='TRADING_HALT' and d.get('symbol'):s.circuit_breaker.halted.add(d['symbol'])
++                elif event.event=='TRADING_RESUMED':s.circuit_breaker.halted.discard(d.get('symbol'))
++                elif event.event=='MARKET_HALT':s.circuit_breaker.market_halted=True
++                elif event.event=='MARKET_RESUMED':s.circuit_breaker.market_halted=False
++                elif event.event=='DIVIDEND' and d.get('symbol'):
++                    s.portfolios[a].cash+=s.portfolios[a].positions.get(d['symbol'],0)*float(d.get('amount_per_share',0))
++                # Trading gates follow observed public events, not a simulated calendar.
++                # Baseline original is evaluated as a research strategy here; its Week 5-only
++                # gate is retained, so it is inactive on earlier-week historical tapes.
++                event=event.model_copy(update={'data':{**d,'tick':s.tick}})
++                await s._broadcast(event)
++            if initial is None and len(latest)>=10:
++                for sym in s.books:
++                    if sym!='ARENA10':
++                        s.portfolios[a].positions[sym]=6
++                        s.portfolios[a].avg_cost[sym]=s.ref_prices[sym]
++                starting=dict(s.portfolios[a].positions);marks=dict(s.ref_prices)
++                initial=s.portfolios[a].net_worth(s.ref_prices,s._bidask_marks())
++            if initial is None:continue
++            await g.execute_due(s.tick)
++            await s._apply_carry_and_maintenance()
++            quotes={sym:q for sym in latest if sym in s.books and sym!='ARENA10' and (q:=g.quote(sym))}
++            raw=rx.events;rx.events=[]
++            p=s.portfolios[a]
++            obs=Observation(s.tick,quotes,dict(p.positions),p.cash,p.net_worth(s.ref_prices,s._bidask_marks()),cash,
++                frozenset(s.circuit_breaker.halted),s.circuit_breaker.market_halted,True,
++                public_events(raw),.003,0.001,False,150)
++            if isinstance(strategy,Original):intents=await strategy.observe_async(obs,raw,rx.pending)
++            else:intents=strategy.observe(obs)
++            clipped=[]
++            for intent in intents:
++                if intent.symbol not in quotes:continue
++                q=quotes[intent.symbol]
++                qty=min(intent.quantity,max(1,int(.1*(q.ask_size if intent.side=='buy' else q.bid_size))))
++                clipped.append(Intent(intent.symbol,intent.side,qty,intent.price,intent.order_type,intent.cancel,intent.group,intent.reason))
++            g.schedule(clipped,obs);g.sample_risk()
++            curve.append(p.net_worth(s.ref_prices,s._bidask_marks()))
++        if initial is None:raise ValueError('Insufficient historical universe')
++        result=summarize(s,[a],[rx],[g],curve,initial,starting,marks)
++        result.update({'file':str(path),'strategy':name,'params':params,'week':week,'ticks':len(curve),
++            'kind':'secondary_historical_taker_replay','participation_cap':.1,'queue_estimated':False,
++            'future_enabled':False,'limitations':'Aggregated future book reconstruction, 3 levels, no maker fills, no endogenous counterfactual participant response; recorded prints are not reused as extra liquidity.'})
++        return result
++
++
++def study(root,chosen,cash=None):
++    result=[]
++    for path in recording_paths(Path(root)/'sessions'):
++        for name in ('event_momentum','post_halt','basket','buy_hold','no_trade'):
++            params=chosen[name]['params'] if name in chosen else {}
++            row=asyncio.run(run_history(path,name,params,cash))
++            result.append(row)
++            print(f'Historical replay {Path(path).name}: {name}, pnl={row["pnl"]:.2f}, fills={row["fills"]}',flush=True)
++    return result
+diff --git a/alpha_lab/metrics.py b/alpha_lab/metrics.py
+new file mode 100644
+index 0000000..bae9f22
+--- /dev/null
++++ b/alpha_lab/metrics.py
+@@ -0,0 +1,48 @@
++"""All P&L comes from actual exchange portfolios; cost diagnostics are not subtracted twice."""
++import math
++from collections import defaultdict, deque
++from statistics import mean, stdev
++
++
++def summarize(server,accounts,receivers,gateways,curve,initial,starting_positions,starting_marks):
++    fills=[f for r in receivers for f in r.fills]
++    commissions=sum(f['fee'] for f in fills); rebates=sum(f['rebate'] for f in fills)
++    turnover=sum(f['price']*f['quantity'] for f in fills)
++    slippage=sum((1 if f['side']=='buy' else -1)*(f['price']-f['decision_mid'])*f['quantity']
++                 for f in fills if f['decision_mid'])
++    peak=initial; drawdown=0.
++    for x in curve:peak=max(peak,x);drawdown=max(drawdown,(peak-x)/peak)
++    returns=[b/a-1 for a,b in zip([initial]+curve[:-1],curve) if a>0]
++    vol=stdev(returns) if len(returns)>1 else 0
++    sharpe=mean(returns)/vol*math.sqrt(len(returns)) if vol else 0.
++    # FIFO closed-fill P&L, including both fills' fees/rebates. Not an order win rate.
++    lots=defaultdict(deque); closed=[]
++    for sym,qty in starting_positions.items():
++        if qty:lots[sym].append([qty,starting_marks[sym],0.])
++    for f in sorted(fills,key=lambda f:f['tick']):
++        signed=f['quantity']*(1 if f['side']=='buy' else -1)
++        cost=(f['fee']-f['rebate'])/f['quantity']; sym=f['symbol']; close_pnl=0.; did_close=False
++        while signed and lots[sym] and signed*lots[sym][0][0]<0:
++            old,price,oldcost=lots[sym][0]; qty=min(abs(signed),abs(old))
++            close_pnl+=qty*((f['price']-price)*(1 if old>0 else -1)-oldcost-cost)
++            lots[sym][0][0]-=qty*(1 if old>0 else -1)
++            signed-=qty*(1 if signed>0 else -1);did_close=True
++            if not lots[sym][0][0]:lots[sym].popleft()
++        if signed:lots[sym].append([signed,f['price'],cost])
++        if did_close:closed.append(close_pnl)
++    errors=defaultdict(int)
++    for r in receivers:
++        for code,n in r.errors.items():errors[code]+=n
++    return {'pnl':curve[-1]-initial if curve else 0.,'initial_equity':initial,
++        'final_equity':curve[-1] if curve else initial,'commissions':commissions,'maker_rebates':rebates,
++        'net_fees':commissions-rebates,'slippage_vs_decision_mid':slippage,
++        'session_sharpe':sharpe,'max_drawdown':drawdown,'turnover':turnover/initial,
++        'traded_notional':turnover,'fills':len(fills),'maker_fills':sum(f['maker'] for f in fills),
++        'closed_fill_win_rate':sum(x>0 for x in closed)/len(closed) if closed else None,
++        'closed_fill_count':len(closed),'liquidations':sum(server.portfolios[a].liquidated for a in accounts),
++        'position_violations':sum(g.position_violations for g in gateways),
++        'max_abs_position':max((g.peak_position for g in gateways),default=0),
++        'max_gross':max((g.peak_gross for g in gateways),default=0),
++        'hedge_failures':sum(g.hedge_failures for g in gateways),'rejects':dict(errors),
++        'carry_paid':sum(server.portfolios[a].total_carry_paid for a in accounts),
++        'same_tick_fills':sum(f['tick']<=f['decision_tick'] for f in fills if f['decision_tick'] is not None)}
+diff --git a/alpha_lab/risk.py b/alpha_lab/risk.py
+new file mode 100644
+index 0000000..655f59c
+--- /dev/null
++++ b/alpha_lab/risk.py
+@@ -0,0 +1,150 @@
++"""Independent conservative gateway; no changes to the Week 5 live controls.
++
++Reservations precede transport, survive cancellation latency and are only
++released after the isolated exchange has processed the request. Stock shorts
++are forbidden. Futures are separately capped and fully counted in gross.
++"""
++import math
++from collections import defaultdict
++from shared.messages import PlaceOrder, CancelOrder
++from team.alpha.core import Quote
++from .exchange import Reservation
++
++
++class Gateway:
++    def __init__(self,server,account,receiver,starting_cash,cap=150,latency=1):
++        self.server=server; self.account=account; self.rx=receiver
++        self.initial=starting_cash; self.cap=min(150,cap); self.latency=max(1,latency)
++        self.queue=[]; self.sequence=0; self.blocked=defaultdict(int)
++        self.group_orders={}; self.group_first_requested={}; self.hedge_failures=0
++        self.peak_position=0; self.peak_gross=0.; self.position_violations=0
++
++    def quote(self,sym):
++        snap=self.server.books[sym].get_snapshot()
++        if not snap['bids'] or not snap['asks']: return None
++        b,a=snap['bids'][0],snap['asks'][0]
++        if b[0]>=a[0]: return None
++        return Quote(b[0],a[0],int(b[1]),int(a[1]))
++
++    def allowed_quantity(self,intent,exclude=None):
++        s=self.server; p=s.portfolios[self.account]; sym=intent.symbol
++        if not math.isfinite(intent.price) or intent.price<=0: return 0
++        if (p.liquidated or not s.session_open or s.circuit_breaker.is_halted(sym)):
++            self.blocked['session_or_halt']+=1; return 0
++        future=s.scenario.flag('futures_enabled') and sym=='ARENA10'
++        if sym=='ARENA10' and not future: return 0
++        ref=s.ref_prices.get(sym,0)
++        if not ref or not .93*ref <= intent.price <= 1.07*ref:
++            self.blocked['price_band']+=1; return 0
++        entries=[e for e in self.rx.pending.values() if e is not exclude]
++        buy=sum(e.quantity for e in entries if e.symbol==sym and e.side=='buy')
++        sell=sum(e.quantity for e in entries if e.symbol==sym and e.side=='sell')
++        pos=p.positions.get(sym,0); cap=min(self.cap,20) if future else self.cap
++        room=cap-pos-buy if intent.side=='buy' else (cap+pos-sell if future else pos-sell)
++        qty=min(intent.quantity,max(0,room))
++        reducing=(intent.side=='sell' and pos>0) or (intent.side=='buy' and pos<0)
++        equity=p.net_worth(s.ref_prices,s._bidask_marks())
++        if not reducing and equity<.7*self.initial: return 0
++        marks=s.ref_prices
++        if any(not marks.get(x) for x,q in p.positions.items() if q): return 0
++        for _ in range(qty+1):
++            if qty<=0: return 0
++            remaining=entries+[Reservation(sym,intent.side,qty,intent.price,intent.order_type)]
++            gross=0.; buys=0.; future_margin=0.
++            for x in set(p.positions)|{e.symbol for e in remaining}:
++                eb=sum(e.quantity for e in remaining if e.symbol==x and e.side=='buy')
++                es=sum(e.quantity for e in remaining if e.symbol==x and e.side=='sell')
++                worst=max(abs(p.positions.get(x,0)+eb),abs(p.positions.get(x,0)-es))
++                px=max([marks.get(x,0)]+[e.price for e in remaining if e.symbol==x])
++                gross+=worst*px
++                if x=='ARENA10':
++                    from exchange import config
++                    future_margin+=worst*config.FUTURES_MARGIN_PER_CONTRACT
++            from exchange import config
++            for e in remaining:
++                buys+=e.quantity*e.price*((1+config.TAKER_FEE_RATE) if e.symbol!='ARENA10' and e.side=='buy'
++                                          else config.TAKER_FEE_RATE if e.symbol=='ARENA10' else 0)
++            # Reducing orders can always release risk, even above an entry cap.
++            if reducing or (gross<=min(.4*self.initial,70000.) and p.cash-buys-future_margin>=.6*self.initial):
++                return qty
++            qty-=1
++        return 0
++
++    def schedule(self,intents,obs):
++        for intent in intents:
++            sym=intent.symbol
++            if sym not in self.server.books: continue
++            if intent.cancel:
++                for key,e in list(self.rx.pending.items()):
++                    if e.symbol==sym and e.oid and not any(x[2]=='cancel' and x[3] is e for x in self.queue):
++                        self.sequence+=1
++                        self.queue.append((obs.tick+self.latency,self.sequence,'cancel',e))
++                continue
++            if sym not in obs.quotes:
++                self.blocked['missing_quote']+=1; continue
++            key=(sym,intent.side)
++            if key in self.rx.pending: continue
++            qty=self.allowed_quantity(intent)
++            if not qty:
++                self.blocked['risk_budget']+=1
++                if intent.group and intent.group in self.group_orders:self.hedge_failures+=1
++                continue
++            delay=self.latency
++            if intent.group:
++                if intent.group not in self.group_orders:
++                    self.group_orders[intent.group]=sym
++                    self.group_first_requested[intent.group]=intent.quantity
++                elif self.group_orders[intent.group]!=sym: delay+=1
++            e=Reservation(sym,intent.side,qty,intent.price,intent.order_type,group=intent.group,
++                decision_tick=obs.tick,decision_mid=obs.quotes[sym].mid,due=obs.tick+delay)
++            self.rx.pending[key]=e
++            self.sequence+=1; self.queue.append((e.due,self.sequence,'place',e))
++
++    async def execute_due(self,tick):
++        due=sorted(x for x in self.queue if x[0]<=tick)
++        self.queue=[x for x in self.queue if x[0]>tick]
++        for _,_,kind,e in due:
++            key=(e.symbol,e.side)
++            if self.rx.pending.get(key) is not e: continue
++            if kind=='cancel':
++                await self.server._handle_cancel_order(self.account,CancelOrder(team_id=self.account,
++                    symbol=e.symbol,order_id=e.oid),self.account)
++                # Serialized isolated engine, no concurrent handler. On a live
++                # venue an unacknowledged cancel is NOT equivalent to this check.
++                if e.oid not in self.server.books[e.symbol]._orders: self.rx.pending.pop(key,None)
++                continue
++            from team.alpha.core import Intent
++            if e.group and self.group_orders[e.group]!=e.symbol:
++                first=self.group_orders[e.group]
++                filled=self.rx.group_fills.get((e.group,first),0)
++                if not filled:
++                    self.rx.pending.pop(key,None); self.hedge_failures+=1; continue
++                # Hedge only the actually executed fraction of the stock leg.
++                proportion=min(1.,filled/max(1,self.group_first_requested[e.group]))
++                e.quantity=max(1,round(e.quantity*proportion))
++            requested=Intent(e.symbol,e.side,e.quantity,e.price,e.kind)
++            qty=self.allowed_quantity(requested,exclude=e)
++            if not qty:
++                self.rx.pending.pop(key,None)
++                if e.group: self.hedge_failures+=1
++                continue
++            e.quantity=qty
++            if self.server.circuit_breaker.is_halted(e.symbol):
++                raise AssertionError('gateway attempted an order during a halt')
++            await self.server._handle_place_order(self.account,PlaceOrder(team_id=self.account,
++                symbol=e.symbol,side=e.side,order_type=e.kind,price=e.price,quantity=qty),self.account)
++            if e.kind=='ioc' or not e.oid or e.oid not in self.server.books[e.symbol]._orders:
++                self.rx.pending.pop(key,None)
++        self.sample_risk()
++
++    def sample_risk(self):
++        p=self.server.portfolios[self.account]
++        self.peak_position=max(self.peak_position,max((abs(q) for q in p.positions.values()),default=0))
++        self.peak_gross=max(self.peak_gross,sum(abs(q)*self.server.ref_prices.get(sym,0)
++            for sym,q in p.positions.items()))
++        for sym in set(p.positions)|{e.symbol for e in self.rx.pending.values()}:
++            entries=[e for e in self.rx.pending.values() if e.symbol==sym]
++            hi=p.positions.get(sym,0)+sum(e.quantity for e in entries if e.side=='buy')
++            lo=p.positions.get(sym,0)-sum(e.quantity for e in entries if e.side=='sell')
++            cap=min(20,self.cap) if sym=='ARENA10' else self.cap
++            if max(abs(hi),abs(lo))>cap: self.position_violations+=1
+diff --git a/alpha_lab/runner.py b/alpha_lab/runner.py
+new file mode 100644
+index 0000000..c92a99f
+--- /dev/null
++++ b/alpha_lab/runner.py
+@@ -0,0 +1,271 @@
++"""One isolated strategy experiment using real local exchange handlers.
++
++The exogenous population is a deliberately simple, seeded liquidity/flow model,
++not a claim to reproduce hosted participants. Each candidate gets its own
++exchange; candidates never trade against each other or see private future state.
++"""
++from contextlib import contextmanager
++from copy import deepcopy
++from dataclasses import asdict
++from functools import lru_cache
++import json
++import logging
++import math
++import os
++from pathlib import Path
++import random
++import tempfile
++from unittest.mock import patch
++
++import exchange.config as cfg
++import exchange.persistence as persistence
++from exchange.scenario import load_week
++from exchange.server import Portfolio
++from plugins.securities import defaults
++from shared.messages import PlaceOrder, CancelOrder, SessionEvent, ErrorMsg
++from team.config import CAPITAL
++from team.alpha import STRATEGIES
++from team.alpha.core import Observation, PublicEvent, Intent
++from .exchange import OfflineExchange, Receiver
++from .risk import Gateway
++from .baselines import NoTrade, BuyHold, Original
++from .metrics import summarize
++
++UNIVERSE=('AAPL','NVDA','NFLX','AMD')
++BASELINES={'no_trade':NoTrade,'buy_hold':BuyHold}
++_RAW_INNOVATION=defaults.fundamental_innovation
++
++@lru_cache(maxsize=40000)
++def cached_innovation(symbol,tick,sigma,mu,seed,vol):
++    return _RAW_INNOVATION(symbol,tick,sigma,mu)
++
++def memo_innovation(symbol,tick,sigma,mu=0.):
++    return cached_innovation(symbol,tick,sigma,mu,defaults.FUNDAMENTAL_SEED,defaults.FUNDAMENTAL_VOL)
++
++
++def default_cash():return float(CAPITAL.get('6_rings_trader_1',cfg.INITIAL_CASH))
++
++
++@contextmanager
++def isolated(seed,week,cash,n,fee=.003,stress='base'):
++    saved={k:deepcopy(v) for k,v in vars(cfg).items() if k.isupper() and isinstance(v,(str,int,float,bool,dict,set,tuple,list))}
++    saved_cache=deepcopy(cfg._roster_cache); saved_persist=persistence.SEASON_PATH
++    saved_fund=(defaults.FUNDAMENTAL_SEED,defaults.FUNDAMENTAL_VOL)
++    saved_innovation=defaults.fundamental_innovation
++    defaults.fundamental_innovation=memo_innovation
++    saved_rng=random.getstate(); saved_env=dict(os.environ)
++    log_level=logging.root.manager.disable
++    import trader.config as tc
++    saved_team=tc.TEAM_ID
++    import trader.trader as trader_engine
++    saved_quiet=trader_engine._console.quiet
++    trader_engine._console.quiet=True
++    with tempfile.TemporaryDirectory(prefix='algoarena_alpha_') as tmp:
++        try:
++            os.environ.pop('GAME_WEEK',None);os.environ.pop('SCENARIO_PATH',None)
++            os.environ['REPORTS_DIR']=tmp
++            cfg.RECORD_SESSIONS=False;cfg.SEASON_PERSIST='false'
++            cfg.LATENCY_MS_DEFAULT=cfg.LATENCY_MS_COLOCATED=0.
++            cfg.TAKER_FEE_RATE=fee;cfg._TAKER_FEE_FROM_ENV=True;cfg._MAKER_REBATE_FROM_ENV=True
++            cfg.QUEUE_FEEDBACK_ENABLED=False;cfg.LATENCY_STATS_ENABLED=False
++            cfg.ROSTER_PATH=str(Path(tmp)/'roster.json')
++            accounts=[f'alpha_{i}' for i in range(n)]
++            # Same per-team grant fraction as the configured three live seats.
++            # Split 6 endowed shares across combined sleeves instead of multiplying it.
++            all_seats=accounts+[f'inactive_{i}' for i in range(3*n-n)]
++            roster={'research':{'traders':all_seats,'capital':{a:cash/n for a in accounts}},
++                    'liquidity':{'brokers':['liquidity'],'capital':{'liquidity':1e9}},
++                    'flow':{'traders':['flow'],'capital':{'flow':1e9}}}
++            for symbol in UNIVERSE+('ARENA10',):
++                name='liquidity_'+symbol
++                roster[name]={'brokers':[name],'capital':{name:1e9}}
++            Path(cfg.ROSTER_PATH).write_text(json.dumps(roster))
++            cfg._roster_cache={'key':None,'data':{}}
++            persistence.SEASON_PATH=str(Path(tmp)/'season.json')
++            defaults.FUNDAMENTAL_SEED=f'alpha:{seed}'
++            defaults.FUNDAMENTAL_VOL=(.5,1.,2.,4.)[seed%4]*(2 if stress=='volatile' else 1)
++            random.seed(seed)
++            scenario=load_week(week);scenario.apply()
++            if stress=='volatile':
++                for event in scenario.events:
++                    if 'magnitude_range' in event:event['magnitude_range']=[x*1.5 for x in event['magnitude_range']]
++            logging.disable(logging.CRITICAL)
++            yield Path(tmp),scenario,accounts
++        finally:
++            for key,value in saved.items():setattr(cfg,key,value)
++            cfg._roster_cache=saved_cache;persistence.SEASON_PATH=saved_persist
++            defaults.FUNDAMENTAL_SEED,defaults.FUNDAMENTAL_VOL=saved_fund
++            defaults.fundamental_innovation=saved_innovation
++            random.setstate(saved_rng);tc.TEAM_ID=saved_team
++            os.environ.clear();os.environ.update(saved_env)
++            trader_engine._console.quiet=saved_quiet
++            logging.disable(log_level)
++
++
++class MarketPopulation:
++    def __init__(self,server,seed,stress='base'):
++        self.server=server;self.rng=random.Random(seed+77191)
++        self.spread=(.0004,.0012,.003)[seed%3]*(2 if stress=='volatile' else 1)
++        self.ttl=(2,3,5)[seed%3];self.depth=(12,25,45)[seed%3]
++        self.informed=(.1,.35,.65)[seed%3]
++        self.ids={};self.last={};self.refs={}
++        self.symbols=UNIVERSE+(('ARENA10',) if server.scenario.flag('futures_enabled') else ())
++
++    async def refresh(self,force=False):
++        s=self.server
++        for sym in self.symbols:
++            if not s.session_open and s.auction_phase!='preopen':continue
++            if s.circuit_breaker.is_halted(sym):continue
++            if not force and s.tick-self.last.get(sym,-999)<self.ttl:continue
++            # Actual cancel/order requests, not a synthetic touch fill rule.
++            account='liquidity_'+sym
++            for oid in self.ids.get(sym,[]):
++                await s._handle_cancel_order(account,CancelOrder(team_id=account,symbol=sym,order_id=oid),account)
++            before=set(s.books[sym]._orders)
++            ref=s.ref_prices[sym]
++            for level in range(2):
++                width=self.spread/2*(1+level)
++                for side,price in [('buy',ref*(1-width)),('sell',ref*(1+width))]:
++                    qty=self.depth*(level+1)
++                    await s._handle_place_order(account,PlaceOrder(team_id=account,symbol=sym,
++                        side=side,quantity=qty,price=round(price,2),order_type='post_only'),account)
++            self.ids[sym]=[oid for oid,e in s.books[sym]._orders.items() if oid not in before and e.team_id==account]
++            self.last[sym]=s.tick
++
++    async def flow(self):
++        s=self.server
++        for sym in self.symbols:
++            if not s.session_open or s.circuit_breaker.is_halted(sym):continue
++            ref=s.ref_prices[sym];previous=self.refs.get(sym,ref);self.refs[sym]=ref
++            if self.rng.random()>.55:continue
++            change=ref/previous-1
++            probability=.5+self.informed*max(-.45,min(.45,change*80))
++            side='buy' if self.rng.random()<probability else 'sell'
++            snap=s.books[sym].get_snapshot();levels=snap['asks' if side=='buy' else 'bids']
++            if not levels:continue
++            price=levels[0][0]*(1.001 if side=='buy' else .999)
++            await s._handle_place_order('flow',PlaceOrder(team_id='flow',symbol=sym,side=side,
++                quantity=self.rng.randint(1,18),price=round(price,2),order_type='ioc'),'flow')
++
++
++def public_events(raw):
++    result=[]
++    for e in raw:
++        d=e.data or {};affected=d.get('affected') or ([d['symbol']] if d.get('symbol') else [])
++        result.append(PublicEvent(e.event,int(d.get('tick',0)),tuple(affected),str(d.get('kind',''))))
++    return tuple(result)
++
++
++async def run_one(seed,components,ticks=1500,week=5,cash=None,stress='base',keep_curve=False):
++    cash=default_cash() if cash is None else cash
++    n=len(components);fee=.006 if stress=='fees_60bps' else .003
++    with isolated(seed,week,cash,n,fee,stress) as (tmp,scenario,accounts):
++        virtual=[1700000000.]
++        with patch('time.time',lambda:virtual[0]):
++            s=OfflineExchange();s.set_scenario(scenario)
++            s.registry.reset_tick()
++            for sym,entry in s.registry.securities.items():
++                base=entry['defn'].base_price;entry['current_price']=base;s.registry.prices[sym]=base
++                s.ref_prices[sym]=base
++                if sym in s.price_engines:
++                    engine=s.price_engines[sym]
++                    engine.fair_value=engine.market_price=engine.session_open=base
++                    engine.impact_buffer=0.;engine.price_history.clear()
++            background_errors={}
++            def background_receive(msg):
++                if isinstance(msg,ErrorMsg):background_errors[msg.code]=background_errors.get(msg.code,0)+1
++            for name,role in [('liquidity','broker'),('flow','trader')]+[('liquidity_'+sym,'broker') for sym in UNIVERSE+('ARENA10',)]:
++                s.portfolios[name]=Portfolio(team_id=name,role=role,level=1,cash=1e9)
++                s.clients[name]=name
++                s.receivers[name]=background_receive
++            receivers=[];gateways=[];strategies=[]
++            for account,(name,params) in zip(accounts,components):
++                role='broker' if name=='market_making' else 'trader'
++                s.portfolios[account]=Portfolio(team_id=account,role=role,level=1,cash=cash/n)
++                s.clients[account]=account
++                rx=Receiver(account);rx.current=s
++                cap=max(1,(20 if name=='market_making' else 150)//n)
++                gateway=Gateway(s,account,rx,cash/n,cap,latency=3 if stress=='latency_3ticks' else 1)
++                strategy=(Original(account,tmp/(account+'.json'),s) if name=='original' else
++                    BASELINES[name]() if name in BASELINES else STRATEGIES[name](**params))
++                if name=='original':
++                    base_receiver=rx
++                    def receive(msg,receiver=base_receiver,original=strategy):
++                        from shared.messages import TradeExecution
++                        receiver(msg)
++                        if isinstance(msg,TradeExecution):original.on_fill(msg)
++                    s.receivers[account]=receive
++                else:s.receivers[account]=rx
++                receivers.append(rx);gateways.append(gateway);strategies.append(strategy)
++            population=MarketPopulation(s,seed,stress)
++            await s.open_session()
++            # Real opening auction and grants, but strategies deliberately wait for continuous trading.
++            while s.auction_phase=='preopen':
++                await population.refresh(force=True)
++                virtual[0]+=1;await s.advance_tick()
++            initial=sum(s.portfolios[a].net_worth(s.ref_prices,s._bidask_marks()) for a in accounts)
++            starting_positions={sym:sum(s.portfolios[a].positions.get(sym,0) for a in accounts) for sym in s.books}
++            starting_marks=dict(s.ref_prices)
++            starting_per_account={a:dict(s.portfolios[a].positions) for a in accounts}
++            curve=[];max_team=0;team_violations=0;halts=0;resumes=0
++            for step in range(ticks):
++                virtual[0]+=1
++                await s.advance_tick();await s.resume_due()
++                await population.refresh()
++                for gateway in gateways:await gateway.execute_due(s.tick)
++                await population.flow()
++                s._score_markouts(virtual[0])
++                quotes={sym:q for sym in population.symbols if (q:=gateways[0].quote(sym))}
++                halted=frozenset(s.circuit_breaker.halted)
++                for account,strategy,rx,gateway in zip(accounts,strategies,receivers,gateways):
++                    p=s.portfolios[account]
++                    raw=rx.events;rx.events=[]
++                    events=public_events(raw)
++                    # Events that omit their tick are stamped at actual observation.
++                    events=tuple(PublicEvent(e.event,e.tick or s.tick,e.symbols,e.kind) for e in events)
++                    halts+=sum(e.event=='TRADING_HALT' for e in events)
++                    resumes+=sum(e.event=='TRADING_RESUMED' for e in events)
++                    obs=Observation(s.tick,quotes,dict(p.positions),p.cash,
++                        p.net_worth(s.ref_prices,s._bidask_marks()),cash/n,halted,
++                        s.circuit_breaker.market_halted,s.session_open,events,cfg.TAKER_FEE_RATE,
++                        cfg.MAKER_REBATE_RATE,scenario.flag('futures_enabled'),gateway.cap)
++                    if step>=ticks-12 and components[accounts.index(account)][0] not in BASELINES:
++                        intents=[]
++                        for sym in population.symbols:
++                            if sym in quotes and sym not in halted:
++                                intents.append(Intent(sym,'buy',0,0,cancel=True))
++                                intents+=StrategyCross(obs,sym,starting_per_account[account].get(sym,0))
++                    elif isinstance(strategy,Original):
++                        intents=await strategy.observe_async(obs,raw,rx.pending)
++                    else:intents=strategy.observe(obs)
++                    gateway.schedule(intents,obs)
++                    gateway.sample_risk()
++                for sym in s.books:
++                    lo=hi=sum(s.portfolios[a].positions.get(sym,0) for a in accounts)
++                    for rx in receivers:
++                        for e in rx.pending.values():
++                            if e.symbol==sym:
++                                if e.side=='buy':hi+=e.quantity
++                                else:lo-=e.quantity
++                    worst=max(abs(lo),abs(hi));max_team=max(max_team,worst)
++                    if worst>scenario.position_limit:team_violations+=1
++                curve.append(sum(s.portfolios[a].net_worth(s.ref_prices,s._bidask_marks()) for a in accounts))
++            result=summarize(s,accounts,receivers,gateways,curve,initial,starting_positions,starting_marks)
++            result.update({'seed':seed,'week':week,'stress':stress,'ticks':ticks,
++                'components':components,'cash':cash,'taker_fee':fee,'maker_rebate_rate':cfg.MAKER_REBATE_RATE,
++                'background_errors':background_errors,'spread_bps':population.spread*10000,'quote_ttl':population.ttl,
++                'volatility_multiplier':defaults.FUNDAMENTAL_VOL,
++                'max_team_position':max_team,'team_position_violations':team_violations,
++                'halts':halts//n,'resumes':resumes//n,
++                'open_overlay_shares':sum(abs(s.portfolios[a].positions.get(sym,0)-starting_per_account[a].get(sym,0))
++                    for a in accounts for sym in s.books),
++                'availability':'disabled_by_week_gate' if all(name=='basket' for name,_ in components) and not scenario.flag('futures_enabled') else 'enabled'})
++            if keep_curve:
++                result['equity_curve']=curve;result['fill_details']=[f for r in receivers for f in r.fills]
++            # No close_session persistence/report writes; any timer is virtual and holds no asyncio task.
++            return result
++
++
++def StrategyCross(obs,sym,target):
++    from team.alpha.core import Strategy
++    return Strategy.cross(obs,sym,target,'end_of_test_unwind')
+diff --git a/scripts/__init__.py b/scripts/__init__.py
+new file mode 100644
+index 0000000..b107c29
+--- /dev/null
++++ b/scripts/__init__.py
+@@ -0,0 +1 @@
++"""Repository command modules, importable without third-party namespace collisions."""
+diff --git a/scripts/alpha_backtest.py b/scripts/alpha_backtest.py
+new file mode 100644
+index 0000000..b74f520
+--- /dev/null
++++ b/scripts/alpha_backtest.py
+@@ -0,0 +1,109 @@
++#!/usr/bin/env python3
++"""Completely offline real-exchange alpha experiments. Never opens a socket."""
++import argparse
++import asyncio
++from dataclasses import asdict
++import hashlib
++import json
++import os
++import platform
++from pathlib import Path
++import sys
++
++ROOT=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(ROOT))
++import arena  # engine path bootstrap; no live run() calls
++from alpha_lab.data import inventory
++from alpha_lab.experiment import grids,spec,run_batch,save_rows,select,ablations,Candidate,source_hashes
++from alpha_lab.runner import default_cash,run_one
++
++
++def main():
++    ap=argparse.ArgumentParser(description=__doc__)
++    ap.add_argument('--output',type=Path,default=ROOT/'alpha_results'/'study')
++    ap.add_argument('--calibration-seeds',type=int,default=12)
++    ap.add_argument('--evaluation-seeds',type=int,default=50)
++    ap.add_argument('--ticks',type=int,default=1500)
++    ap.add_argument('--workers',type=int,default=4)
++    ap.add_argument('--cash',type=float,default=None)
++    ap.add_argument('--stage',choices=('calibrate','evaluate','stress','history','all'),default='all')
++    ap.add_argument('--skip-inventory',action='store_true')
++    args=ap.parse_args();out=args.output;out.mkdir(parents=True,exist_ok=True)
++    print(f'Offline experiment pid={os.getpid()}, stage={args.stage}, output={out}',flush=True)
++    (out/'runner.pid').write_text(str(os.getpid()))
++    cash=default_cash() if args.cash is None else args.cash
++    if args.stage in ('all','calibrate'):
++        if not args.skip_inventory:(out/'data_inventory.json').write_text(json.dumps(inventory(ROOT/'sessions'),indent=2))
++        candidates=grids()
++        metadata={'python':platform.python_version(),'pid':os.getpid(),'calibration_seeds':list(range(args.calibration_seeds)),
++            'evaluation_seeds':list(range(1000,1000+args.evaluation_seeds)),
++            'ticks':args.ticks,'cash':cash,'cash_source':'team.config.CAPITAL[6_rings_trader_1]' if args.cash is None else 'explicit CLI override',
++            'fee':.003,'execution_delay_ticks':1,'grid_count':len(candidates),
++            'calibration_weeks':{'event_momentum':5,'post_halt':5,'market_making':5,'basket':9},
++            'selection':'mean paired excess over no_trade minus 0.5 standard deviation; safety failures penalized 1e9',
++            'source_sha256':source_hashes(ROOT),
++            'scenario_sha256':{str(w):hashlib.sha256((ROOT/'season'/f'week{w:02}.json').read_bytes()).hexdigest() for w in (5,9)},
++            'scenario_definitions':{str(w):json.loads((ROOT/'season'/f'week{w:02}.json').read_text()) for w in (5,9)},
++            'live_trader_sha256':hashlib.sha256((ROOT/'team/trader.py').read_bytes()).hexdigest(),
++            'live_broker_sha256':hashlib.sha256((ROOT/'team/broker.py').read_bytes()).hexdigest(),
++            'model':'actual exchange matching/risk/fees/calendar/auctions; synthetic external liquidity and flow; independent venue per candidate',
++            'strictly_offline':True}
++        (out/'protocol.json').write_text(json.dumps(metadata,indent=2))
++        calibration=[]
++        for week in (5,9):
++            selected=[spec(c) for c in candidates if (c.name=='basket')==(week==9)]
++            selected.append(spec(Candidate('no_trade',{},'no_trade')))
++            calibration+=run_batch(metadata['calibration_seeds'],selected,args.ticks,week,cash,'base',args.workers,f'calibration W{week}')
++            save_rows(out/'calibration',calibration)
++        chosen,sensitivity=select(calibration)
++        (out/'frozen_selection.json').write_text(json.dumps(chosen,indent=2))
++        save_rows(out/'sensitivity',sensitivity)
++        print('Calibration complete. Parameters frozen before OOS starts.',flush=True)
++    metadata=json.loads((out/'protocol.json').read_text())
++    chosen=json.loads((out/'frozen_selection.json').read_text())
++    for week,expected in metadata.get('scenario_sha256',{}).items():
++        if hashlib.sha256((ROOT/'season'/f'week{int(week):02}.json').read_bytes()).hexdigest()!=expected:
++            raise ValueError('Scenario changed after calibration')
++    if args.ticks!=metadata['ticks'] or cash!=metadata['cash']:raise ValueError('Protocol mismatch: use the calibration ticks/cash')
++    if source_hashes(ROOT)!=metadata['source_sha256']:raise ValueError('Source changed after calibration; rerun calibration in a new output directory')
++    seeds=metadata['evaluation_seeds'];ticks=metadata['ticks']
++    selected=[spec(Candidate(name,row['params'],name)) for name,row in chosen.items()]
++    benchmarks=[spec(Candidate(name,{},name)) for name in ('original','buy_hold','no_trade')]
++    # Cross-week calibration scores are not comparable: combine only the best
++    # Week 5 candidates, selected without looking at OOS performance.
++    top=sorted((r for name,r in chosen.items() if name!='basket'),key=lambda r:-r['selection_score'])[:2]
++    combined={'name':'combined','params':{},'key':'combined',
++        'components':[(r['strategy'],r['params']) for r in top]}
++    (out/'combined_definition.json').write_text(json.dumps(combined,indent=2))
++    if args.stage in ('all','evaluate'):
++        results=[]
++        for week in (5,9):
++            results+=run_batch(seeds,selected+benchmarks+[combined],ticks,week,cash,'base',args.workers,f'OOS W{week}')
++            save_rows(out/'out_of_sample',results)
++        variants=[]
++        for week in (5,9):
++            applicable=[x for x in ablations(chosen) if (x['name']=='basket')==(week==9)]
++            variants+=run_batch(seeds,applicable+[spec(Candidate('no_trade',{},'no_trade'))],ticks,week,cash,'base',args.workers,f'ablation W{week}')
++            save_rows(out/'ablations',variants)
++        curves=[]
++        # Fixed illustrative seed, not the best-performing path.
++        for candidate in selected+benchmarks+[combined]:
++            r=asyncio.run(run_one(seeds[0],candidate.get('components') or [(candidate['name'],candidate['params'])],
++                ticks=ticks,week=9,cash=cash,keep_curve=True))
++            r['candidate']=candidate['key'];curves.append(r)
++        (out/'example_curves.json').write_text(json.dumps(curves,indent=2))
++    if args.stage in ('all','stress'):
++        results=[]
++        for stress in ('fees_60bps','latency_3ticks','volatile'):
++            for week in (5,9):
++                results+=run_batch(seeds,selected+benchmarks+[combined],ticks,week,cash,stress,args.workers,f'{stress} W{week}')
++                save_rows(out/'stress',results)
++    if args.stage in ('all','history'):
++        from scripts.alpha_history import study_repaired
++        historical=study_repaired(ROOT,chosen,cash,args.workers)
++        save_rows(out/'historical',historical)
++        save_rows(out/'historical_funded',historical)
++    print(f'Complete: {out}',flush=True)
++
++
++if __name__=='__main__':main()
+diff --git a/scripts/alpha_fee_audit.py b/scripts/alpha_fee_audit.py
+new file mode 100644
+index 0000000..97a162c
+--- /dev/null
++++ b/scripts/alpha_fee_audit.py
+@@ -0,0 +1,72 @@
++#!/usr/bin/env python3
++"""Replay fee-bearing maker runs and audit authoritative cancellation charges.
++
++Trading code and parameters are untouched. A read-only metrics observer extracts
++final Portfolio.total_fees_paid, then requires P&L to reproduce before attaching
++the extra fee breakdown to the recorded result. Week 5 has no cancellation fee.
++"""
++import argparse
++import asyncio
++from concurrent.futures import ProcessPoolExecutor,as_completed
++import json
++from pathlib import Path
++import sys
++
++ROOT=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(ROOT))
++import arena
++from alpha_lab.experiment import save_rows,source_hashes
++
++
++def replay(row):
++    import alpha_lab.runner as runner
++    original=runner.summarize
++    def observed(server,accounts,*args,**kwargs):
++        result=original(server,accounts,*args,**kwargs)
++        total=sum(server.portfolios[a].total_fees_paid for a in accounts)
++        rebate=sum(server.portfolios[a].total_rebates_earned for a in accounts)
++        result.update(total_fees_paid=total,cancellation_fees_paid=max(0.,total-result['commissions']),
++                      total_net_fees=total-rebate)
++        return result
++    runner.summarize=observed
++    try:
++        actual=asyncio.run(runner.run_one(row['seed'],row['components'],ticks=row['ticks'],
++            week=row['week'],cash=row['cash'],stress=row['stress']))
++        if abs(actual['pnl']-row['pnl'])>1e-6 or actual['fills']!=row['fills']:
++            raise AssertionError(f"Nonreproducible replay: {row['candidate']} W{row['week']} seed {row['seed']}")
++        return {k:actual[k] for k in ('total_fees_paid','cancellation_fees_paid','total_net_fees')}
++    finally:runner.summarize=original
++
++
++def main():
++    ap=argparse.ArgumentParser(description=__doc__)
++    ap.add_argument('--input',type=Path,default=ROOT/'alpha_results'/'study')
++    ap.add_argument('--workers',type=int,default=4)
++    args=ap.parse_args();root=args.input
++    protocol=json.loads((root/'protocol.json').read_text())
++    if source_hashes(ROOT)!=protocol['source_sha256']:raise ValueError('Model source changed since the executed study')
++    files=[root/name for name in ('out_of_sample.json','stress.json','ablations.json','calibration.json')]
++    files +=[root/'portfolio_confirmation'/name for name in ('results.json','stress.json')]
++    files=[p for p in files if p.exists()]
++    jobs=[];records={};audits=[]
++    for file in files:
++        data=json.loads(file.read_text());records[file]=data
++        for i,row in enumerate(data):
++            if row['week']==9 and any(name=='market_making' for name,_ in row['components']):
++                jobs.append((file,i,row))
++            else:
++                row.update(total_fees_paid=row['commissions'],cancellation_fees_paid=0.,total_net_fees=row['net_fees'])
++    with ProcessPoolExecutor(max_workers=args.workers) as pool:
++        futures={pool.submit(replay,row):(file,i,row) for file,i,row in jobs}
++        for count,future in enumerate(as_completed(futures),1):
++            file,i,row=futures[future];extra=future.result()
++            records[file][i].update(extra)
++            audits.append({'file':str(file.relative_to(root)),'week':row['week'],'seed':row['seed'],
++                'candidate':row['candidate'],'stress':row['stress'],'pnl_reproduced':True,**extra})
++            if count==1 or count%25==0 or count==len(jobs):print(f'Fee audit: {count}/{len(jobs)} exact P&L/fill replays',flush=True)
++    for file,data in records.items():save_rows(file.with_suffix(''),data)
++    save_rows(root/'fee_audit',sorted(audits,key=lambda r:(r['file'],r['stress'],r['week'],r['candidate'],r['seed'])))
++    print('Authoritative cancellation-fee audit complete.',flush=True)
++
++
++if __name__=='__main__':main()
+diff --git a/scripts/alpha_history.py b/scripts/alpha_history.py
+new file mode 100644
+index 0000000..2b219be
+--- /dev/null
++++ b/scripts/alpha_history.py
+@@ -0,0 +1,112 @@
++#!/usr/bin/env python3
++"""Funded, bounded background accounts for the secondary historical replay.
++
++Earlier scenarios prohibit shorts. Reconstructing a historical offer therefore
++requires a genuinely funded stock inventory, not an unfunded synthetic ask.
++This fixture adapter supplies 200 shares/provider and truncates each displayed
++level to at most 60 shares. All orders still traverse the real exchange checks.
++The frozen primary simulation and its strategies are unchanged.
++"""
++import argparse
++import asyncio
++from concurrent.futures import ProcessPoolExecutor, as_completed
++import hashlib
++import json
++from pathlib import Path
++import sys
++from unittest.mock import patch
++
++ROOT=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(ROOT))
++import arena
++import alpha_lab.history as history
++from alpha_lab.data import recording_paths
++from alpha_lab.experiment import save_rows
++
++
++async def run_repaired(path,name,params,cash=None):
++    original_portfolio=history.Portfolio;original_order=history.PlaceOrder
++    providers={}
++    original_exchange=history.OfflineExchange;original_frames=history.frames;original_summary=history.summarize
++    class PhaseAwareExchange(original_exchange):
++        async def _broadcast(self,msg,skip_ids=None):
++            if getattr(msg,'event',None) in ('SESSION_PREOPEN','SESSION_PRECLOSE','SESSION_CLOSED'):
++                self.session_open=False
++                self.auction_phase='preopen' if msg.event=='SESSION_PREOPEN' else None
++                for book in self.books.values():book.auction_mode=bool(self.auction_phase)
++            elif getattr(msg,'event',None)=='SESSION_OPEN':
++                self.session_open=True;self.auction_phase=None
++                for book in self.books.values():book.auction_mode=False
++            await super()._broadcast(msg,skip_ids)
++        async def _handle_place_order(self,ws,msg,team_id):
++            if team_id.startswith('alpha_') and not self.session_open:
++                raise AssertionError('historical subject submitted outside continuous trading')
++            return await super()._handle_place_order(ws,msg,team_id)
++        async def _apply_carry_and_maintenance(self):
++            if self.session_open:await super()._apply_carry_and_maintenance()
++    def phase_frames(file):
++        tape=original_frames(file)
++        if tape and any(e.get('event')=='SESSION_OPEN' for _,frame in tape for e in frame['events']):
++            tick,frame=tape[0]
++            first={**frame,'events':[{'type':'session_event','event':'SESSION_PREOPEN','message':'await recorded open','data':{}}]+list(frame['events'])}
++            return [(tick,first)]+tape[1:]
++        return tape
++    def observed_summary(server,accounts,receivers,*args,**kwargs):
++        result=original_summary(server,accounts,receivers,*args,**kwargs)
++        fills=[f for rx in receivers for f in rx.fills]
++        result['first_fill_tick']=min((f['tick'] for f in fills),default=None)
++        result['last_fill_tick']=max((f['tick'] for f in fills),default=None)
++        return result
++    def funded_portfolio(*args,**kwargs):
++        p=original_portfolio(*args,**kwargs)
++        if p.team_id.startswith('liquidity_'):
++            sym=p.team_id.removeprefix('liquidity_')
++            if sym!='ARENA10':p.positions[sym]=200
++            providers[p.team_id]=p
++        return p
++    def bounded_order(*args,**kwargs):
++        provider=providers.get(kwargs.get('team_id'))
++        if provider is not None:
++            qty=min(60,int(kwargs['quantity']))
++            if kwargs['side']=='sell':qty=min(qty,provider.positions.get(kwargs['symbol'],0))
++            kwargs['quantity']=qty
++        return original_order(*args,**kwargs)
++    with patch.object(history,'Portfolio',funded_portfolio),patch.object(history,'PlaceOrder',bounded_order),patch.object(history,'OfflineExchange',PhaseAwareExchange),patch.object(history,'frames',phase_frames),patch.object(history,'summarize',observed_summary):
++        result=await history.run_history(path,name,params,cash)
++    result.update(background_initial_inventory=200,depth_cap_per_level=60,
++        historical_fixture='funded_providers_v3',recorded_session_phases_enforced=True,
++        fixture_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
++    return result
++
++
++def historical_job(payload):
++    path,name,params,cash=payload
++    return asyncio.run(run_repaired(path,name,params,cash))
++
++
++def study_repaired(root,chosen,cash=None,workers=4):
++    result=[];jobs=[]
++    for path in recording_paths(Path(root)/'sessions'):
++        for name in ('event_momentum','post_halt','basket','buy_hold','no_trade'):
++            jobs.append((str(path),name,chosen[name]['params'] if name in chosen else {},cash))
++    with ProcessPoolExecutor(max_workers=workers) as pool:
++        futures=[pool.submit(historical_job,payload) for payload in jobs]
++        for future in as_completed(futures):
++            row=future.result();result.append(row)
++            print(f'Funded historical replay {Path(row["file"]).name}: {row["strategy"]}, pnl={row["pnl"]:.2f}, fills={row["fills"]}',flush=True)
++    return sorted(result,key=lambda r:(r['file'],r['strategy']))
++
++
++def main():
++    ap=argparse.ArgumentParser(description=__doc__)
++    ap.add_argument('--input',type=Path,default=ROOT/'alpha_results'/'study')
++    ap.add_argument('--workers',type=int,default=4)
++    args=ap.parse_args();out=args.input
++    protocol=json.loads((out/'protocol.json').read_text())
++    chosen=json.loads((out/'frozen_selection.json').read_text())
++    results=study_repaired(ROOT,chosen,protocol['cash'],args.workers)
++    save_rows(out/'historical_funded',results)
++    save_rows(out/'historical',results)
++
++
++if __name__=='__main__':main()
+diff --git a/scripts/alpha_portfolio.py b/scripts/alpha_portfolio.py
+new file mode 100644
+index 0000000..5cee7f8
+--- /dev/null
++++ b/scripts/alpha_portfolio.py
+@@ -0,0 +1,62 @@
++#!/usr/bin/env python3
++"""Confirm a profit-ranked combined portfolio on a SECOND, untouched seed set.
++
++The primary study's risk-adjusted selection can choose an almost-inactive
++sleeve. This explicitly different profit-ranked portfolio is chosen from
++calibration means, then tested only on new seeds 2000--2049. Never relabel its
++primary-study performance as a fresh holdout.
++"""
++import argparse
++import json
++from pathlib import Path
++import sys
++
++ROOT=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(ROOT))
++import arena
++from alpha_lab.experiment import run_batch,save_rows,spec,Candidate,source_hashes
++
++
++def main():
++    ap=argparse.ArgumentParser(description=__doc__)
++    ap.add_argument('--input',type=Path,default=ROOT/'alpha_results'/'study')
++    ap.add_argument('--workers',type=int,default=4)
++    ap.add_argument('--resume',action='store_true',help='reuse fully completed week/regime batches with identical definitions')
++    args=ap.parse_args();root=args.input
++    protocol=json.loads((root/'protocol.json').read_text())
++    if source_hashes(ROOT)!=protocol['source_sha256']:raise ValueError('Model source changed since calibration')
++    chosen=json.loads((root/'frozen_selection.json').read_text())
++    top=sorted((r for name,r in chosen.items() if name!='basket' and r['mean_excess_no_trade']>0),
++        key=lambda r:-r['mean_excess_no_trade'])[:2]
++    if len(top)<2:raise ValueError('Fewer than two positive calibration sleeves; no stronger-portfolio claim is justified')
++    components=[(r['strategy'],r['params']) for r in top]
++    combined={'name':'combined_profit','params':{},'key':'combined_profit','components':components}
++    seeds=list(range(2000,2050));out=root/'portfolio_confirmation';out.mkdir(exist_ok=True)
++    definition={'components':components,'seeds':seeds,'selection':'Top two positive calibration mean excess values; equal capital sleeves',
++        'disclosure':'Portfolio design motivated by primary-study results; confirmation seeds are independent and were not used for either selection.',
++        'source_sha256':source_hashes(ROOT),'ticks':protocol['ticks'],'cash':protocol['cash']}
++    if args.resume and (out/'definition.json').exists():
++        old=json.loads((out/'definition.json').read_text())
++        if json.dumps(old,sort_keys=True)!=json.dumps(definition,sort_keys=True):raise ValueError('Cannot resume a different portfolio protocol')
++    (out/'definition.json').write_text(json.dumps(definition,indent=2))
++    candidates=[spec(Candidate(r['strategy'],r['params'],r['strategy'])) for r in top]
++    benchmarks=[spec(Candidate(name,{},name)) for name in ('original','no_trade')]
++    results=json.loads((out/'results.json').read_text()) if args.resume and (out/'results.json').exists() else []
++    for week in (5,9):
++        if len([r for r in results if r['week']==week])==5*len(seeds):continue
++        results=[r for r in results if r['week']!=week]
++        results+=run_batch(seeds,candidates+[combined]+benchmarks,protocol['ticks'],week,
++            protocol['cash'],'base',args.workers,f'Confirmation W{week}')
++        save_rows(out/'results',results)
++    stresses=json.loads((out/'stress.json').read_text()) if args.resume and (out/'stress.json').exists() else []
++    for stress in ('fees_60bps','latency_3ticks','volatile'):
++        for week in (5,9):
++            if len([r for r in stresses if r['week']==week and r['stress']==stress])==3*len(seeds):continue
++            stresses=[r for r in stresses if not (r['week']==week and r['stress']==stress)]
++            stresses+=run_batch(seeds,[combined]+benchmarks,protocol['ticks'],week,
++                protocol['cash'],stress,args.workers,f'Confirmation {stress} W{week}')
++            save_rows(out/'stress',stresses)
++    print('Fresh portfolio confirmation complete:',out,flush=True)
++
++
++if __name__=='__main__':main()
+diff --git a/scripts/alpha_report.py b/scripts/alpha_report.py
+new file mode 100644
+index 0000000..f5590af
+--- /dev/null
++++ b/scripts/alpha_report.py
+@@ -0,0 +1,263 @@
++#!/usr/bin/env python3
++"""Summarize executed experiments; missing studies are never described as passes."""
++import argparse
++import csv
++import json
++import hashlib
++from pathlib import Path
++import sys
++
++ROOT=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(ROOT))
++import numpy as np
++
++
++def confidence(values,seed=34551):
++    a=np.asarray(values,dtype=float)
++    if not len(a):return [None,None]
++    rng=np.random.default_rng(seed)
++    boot=a[rng.integers(0,len(a),size=(5000,len(a)))].mean(axis=1)
++    return [float(np.quantile(boot,.025)),float(np.quantile(boot,.975))]
++
++
++def aggregate(rows):
++    benchmark={(r['week'],r['stress'],r['seed']):r['pnl'] for r in rows if r['candidate']=='no_trade'}
++    grouped={}
++    for r in rows:grouped.setdefault((r['week'],r['stress'],r['candidate']),[]).append(r)
++    summary=[]
++    for (week,stress,name),group in grouped.items():
++        excess=[r['pnl']-benchmark[(week,stress,r['seed'])] for r in group if (week,stress,r['seed']) in benchmark]
++        if len(excess)!=len(group):raise ValueError(f'missing paired no_trade benchmark for {name}')
++        vals=lambda key:np.asarray([r[key] for r in group],dtype=float)
++        win=[r['closed_fill_win_rate'] for r in group if r['closed_fill_win_rate'] is not None]
++        rejection={}
++        for r in group:
++            for code,n in r['rejects'].items():rejection[code]=rejection.get(code,0)+n
++        summary.append({'week':week,'stress':stress,'candidate':name,'strategy':group[0]['strategy'],
++            'n_seeds':len(group),'mean_pnl':float(vals('pnl').mean()),'median_pnl':float(np.median(vals('pnl'))),
++            'pnl_ci95':confidence(vals('pnl')),'mean_excess_no_trade':float(np.mean(excess)),
++            'excess_ci95':confidence(excess),'profitable_seed_fraction':float(np.mean(vals('pnl')>0)),
++            'beats_no_trade_fraction':float(np.mean(np.array(excess)>0)),
++            'mean_net_fees':float(np.mean([r.get('total_net_fees',r['net_fees']) for r in group])),'mean_cancellation_fees':float(np.mean([r.get('cancellation_fees_paid',0.) for r in group])),'mean_commissions':float(vals('commissions').mean()),
++            'mean_rebates':float(vals('maker_rebates').mean()),'mean_slippage':float(vals('slippage_vs_decision_mid').mean()),
++            'mean_session_sharpe':float(vals('session_sharpe').mean()),
++            'worst_drawdown':float(vals('max_drawdown').max()),'mean_turnover':float(vals('turnover').mean()),
++            'mean_closed_fill_win_rate':float(np.mean(win)) if win else None,
++            'mean_fills':float(vals('fills').mean()),'trading_seed_fraction':float(np.mean(vals('fills')>0)),
++            'liquidations':int(vals('liquidations').sum()),
++            'position_violations':int(vals('position_violations').sum()+vals('team_position_violations').sum()),
++            'same_tick_fills':int(vals('same_tick_fills').sum()),
++            'max_position':float(vals('max_abs_position').max()),'max_team_position':float(vals('max_team_position').max()),
++            'mean_hedge_failures':float(vals('hedge_failures').mean()),'mean_unwound_overlay_remaining':float(vals('open_overlay_shares').mean()),
++            'availability':group[0]['availability'],'rejects':rejection})
++    return sorted(summary,key=lambda r:(r['week'],r['stress'],-r['mean_excess_no_trade']))
++
++
++def load(path):return json.loads(path.read_text()) if path.exists() else []
++
++
++def charts(out,summary,rows):
++    import os
++    os.environ.setdefault('MPLCONFIGDIR',str(out/'mpl_cache'))
++    import matplotlib
++    matplotlib.use('Agg')
++    import matplotlib.pyplot as plt
++    fig,axes=plt.subplots(1,2,figsize=(13,5))
++    for ax,week in zip(axes,(5,9)):
++        items=[r for r in summary if r['week']==week and r['stress']=='base']
++        names=[r['candidate']+(' (disabled)' if r['availability']!='enabled' else ' (inactive)' if r['candidate']=='original' and week==9 else '') for r in items];means=[r['mean_excess_no_trade'] for r in items]
++        ax.barh(names,means,color=['#187f65' if x>0 else '#b64e48' for x in means])
++        low=[m-r['excess_ci95'][0] for m,r in zip(means,items)]
++        high=[r['excess_ci95'][1]-m for m,r in zip(means,items)]
++        ax.errorbar(means,range(len(items)),xerr=[low,high],fmt='none',ecolor='#222',capsize=3)
++        ax.axvline(0,color='black',lw=.8);ax.set_title(f'Week {week}: OOS paired excess ({items[0]["n_seeds"]} seeds)')
++        ax.set_xlabel('After-fee P&L versus no-trade ($), bootstrap 95% CI');ax.invert_yaxis()
++    fig.tight_layout();fig.savefig(out/'oos_profitability.png',dpi=180);plt.close(fig)
++    fig,axes=plt.subplots(1,2,figsize=(13,5))
++    for ax,week in zip(axes,(5,9)):
++        items=[r for r in summary if r['week']==week and r['strategy'] in ('event_momentum','post_halt','market_making','basket','combined')]
++        names=sorted({r['candidate'] for r in items})
++        for stress in sorted({r['stress'] for r in items}):
++            data={r['candidate']:r['mean_excess_no_trade'] for r in items if r['stress']==stress}
++            ax.plot(names,[data.get(name,np.nan) for name in names],marker='o',label=stress)
++        ax.axhline(0,color='black',lw=.8);ax.tick_params(axis='x',rotation=25)
++        ax.set_title(f'Week {week} stress tests');ax.set_ylabel('Mean after-fee excess P&L ($)');ax.legend()
++    fig.tight_layout();fig.savefig(out/'stress_profitability.png',dpi=180);plt.close(fig)
++    confirmation=load(out/'portfolio_confirmation_summary.json')
++    if confirmation:
++        fig,axes=plt.subplots(1,2,figsize=(13,5))
++        for ax,week in zip(axes,(5,9)):
++            items=[r for r in confirmation if r['week']==week and r['stress']=='base']
++            values=[r['mean_excess_no_trade'] for r in items]
++            names=[r['candidate'] for r in items]
++            ax.barh(names,values,color='#3573a6')
++            low=[v-r['excess_ci95'][0] for v,r in zip(values,items)]
++            high=[r['excess_ci95'][1]-v for v,r in zip(values,items)]
++            ax.errorbar(values,range(len(items)),xerr=[low,high],fmt='none',ecolor='#222',capsize=3)
++            ax.axvline(0,color='black',lw=.8);ax.invert_yaxis()
++            ax.set_title(f'Week {week}: fresh portfolio confirmation (50 seeds)')
++            ax.set_xlabel('After-fee excess vs no-trade ($), bootstrap 95% CI')
++        fig.tight_layout();fig.savefig(out/'portfolio_confirmation.png',dpi=180);plt.close(fig)
++    sensitivity=load(out/'sensitivity.json')
++    fig,ax=plt.subplots(figsize=(7,4.5))
++    matrix=np.zeros((4,4))
++    for i,c in enumerate((3,5,10,15)):
++        for j,h in enumerate((20,40,60,120)):
++            scores=[r['mean_excess_no_trade'] for r in sensitivity if r['strategy']=='event_momentum'
++                    and r['params']['confirmation']==c and r['params']['holding']==h]
++            matrix[i,j]=np.mean(scores) if scores else np.nan
++    im=ax.imshow(matrix,cmap='RdYlGn');ax.set_xticks(range(4),[20,40,60,120]);ax.set_yticks(range(4),[3,5,10,15])
++    for i in range(4):
++        for j in range(4):ax.text(j,i,f'${matrix[i,j]:.0f}',ha='center',va='center')
++    ax.set_xlabel('Holding ticks');ax.set_ylabel('Confirmation ticks')
++    ax.set_title('Calibration sensitivity only: mean excess\naveraged over trailing multipliers',fontsize=11)
++    fig.colorbar(im,ax=ax,label='$ versus no-trade');fig.tight_layout();fig.savefig(out/'calibration_sensitivity.png',dpi=180);plt.close(fig)
++    curves=load(out/'example_curves.json')
++    if curves:
++        fig,ax=plt.subplots(figsize=(10,5))
++        for row in curves:
++            path=np.asarray(row['equity_curve'])-row['initial_equity']
++            ax.plot(path,label=row['candidate'])
++        ax.set_title(f'Preregistered illustrative seed {curves[0]["seed"]}, Week 9 (not a selected winner)')
++        ax.set_ylabel('MTM after-fee account P&L ($)');ax.set_xlabel('Continuous trading tick');ax.legend(ncol=2)
++        fig.tight_layout();fig.savefig(out/'example_equity.png',dpi=180);plt.close(fig)
++
++
++def main():
++    ap=argparse.ArgumentParser(description=__doc__)
++    ap.add_argument('--input',type=Path,default=ROOT/'alpha_results'/'study')
++    ap.add_argument('--no-charts',action='store_true');args=ap.parse_args();out=args.input
++    protocol=json.loads((out/'protocol.json').read_text())
++    inventory=load(out/'data_inventory.json')
++    for recording in inventory:
++        path=Path(recording['file'])
++        if path.exists():
++            digest=hashlib.sha256()
++            with path.open('rb') as stream:
++                for block in iter(lambda:stream.read(1024*1024),b''):digest.update(block)
++            recording['sha256']=digest.hexdigest()
++    (out/'data_inventory.json').write_text(json.dumps(inventory,indent=2))
++    oos=load(out/'out_of_sample.json')
++    if not oos:raise SystemExit('No executed out-of-sample results found.')
++    expected=set(protocol['evaluation_seeds'])
++    for week in (5,9):
++        for name in ('event_momentum','post_halt','market_making','basket','combined','original','buy_hold','no_trade'):
++            actual={r['seed'] for r in oos if r['week']==week and r['candidate']==name}
++            if actual!=expected:raise SystemExit(f'Incomplete OOS evidence: week {week}, {name}')
++    stresses=load(out/'stress.json')
++    if stresses:
++        for stress in ('fees_60bps','latency_3ticks','volatile'):
++            for week in (5,9):
++                for name in ('event_momentum','post_halt','market_making','basket','combined','original','buy_hold','no_trade'):
++                    actual={r['seed'] for r in stresses if r['week']==week and r['stress']==stress and r['candidate']==name}
++                    if actual!=expected:raise SystemExit(f'Incomplete stress evidence: {stress}, week {week}, {name}')
++    if any(r['week']==9 and any(name=='market_making' for name,_ in r['components']) and 'total_net_fees' not in r for r in oos+stresses):
++        raise SystemExit('Run scripts/alpha_fee_audit.py before reporting maker fees (P&L already includes cancellation charges).')
++    summary=aggregate(oos+stresses)
++    (out/'summary.json').write_text(json.dumps(summary,indent=2))
++    with (out/'summary.csv').open('w',newline='') as f:
++        writer=csv.DictWriter(f,fieldnames=list(summary[0]));writer.writeheader()
++        writer.writerows({k:json.dumps(v) if isinstance(v,(dict,list)) else v for k,v in r.items()} for r in summary)
++    lines=['# Offline alpha results','',
++        'Rankings use held-out after-fee excess over a paired no-trade account. Absolute account P&L also includes endowed shares and cash interest. Robustness labels apply only to the seeded generator; the historical diagnostics do not validate a live edge.',
++        f'Calibration: {len(protocol["calibration_seeds"])} seeds. Evaluation: {len(expected)} disjoint seeds. {protocol["ticks"]} ticks/run; starting cash ${protocol["cash"]:,.0f}; taker fee 30 bps.',
++        '', '## Out-of-sample results','',
++        '| Week | Strategy | Mean account P&L | Mean excess | Excess 95% CI | Beats no-trade | Mean fills | Worst DD |',
++        '|---|---|---:|---:|---|---:|---:|---:|']
++    for r in summary:
++        if r['stress']!='base':continue
++        lo,hi=r['excess_ci95']
++        label=r['candidate']+(' (future disabled)' if r['availability']!='enabled' else ' (Week 5 gate)' if r['candidate']=='original' and r['week']==9 else '')
++        lines.append(f'| {r["week"]} | {label} | ${r["mean_pnl"]:.2f} | ${r["mean_excess_no_trade"]:.2f} | [{lo:.2f}, {hi:.2f}] | {r["beats_no_trade_fraction"]:.0%} | {r["mean_fills"]:.1f} | {r["worst_drawdown"]:.2%} |')
++    lines+=['','## Base-run costs and risk statistics','', '| Week | Strategy | Total net fees | Cancellation charges | Decision-mid slippage | Session Sharpe | Turnover | Closing-fill win rate |', '|---|---|---:|---:|---:|---:|---:|---:|']
++    for r in summary:
++        if r['stress']!='base':continue
++        win='n/a' if r['mean_closed_fill_win_rate'] is None else f'{r["mean_closed_fill_win_rate"]:.1%}'
++        lines.append(f'| {r["week"]} | {r["candidate"]} | ${r["mean_net_fees"]:.2f} | ${r["mean_cancellation_fees"]:.2f} | ${r["mean_slippage"]:.2f} | {r["mean_session_sharpe"]:.2f} | {r["mean_turnover"]:.2f} | {win} |')
++    lines+=['','## Stress tests','', '| Week | Strategy | Regime | Mean excess | 95% CI | Liquidations | Position violations |', '|---|---|---|---:|---|---:|---:|']
++    for r in summary:
++        if r['stress']=='base':continue
++        lo,hi=r['excess_ci95'];lines.append(f'| {r["week"]} | {r["candidate"]} | {r["stress"]} | ${r["mean_excess_no_trade"]:.2f} | [{lo:.2f}, {hi:.2f}] | {r["liquidations"]} | {r["position_violations"]} |')
++    absum=aggregate(load(out/'ablations.json')) if (out/'ablations.json').exists() else []
++    (out/'ablation_summary.json').write_text(json.dumps(absum,indent=2))
++    lines+=['','## Ablations (held-out seeds; no retuning)','', '| Week | Variant | Mean excess | 95% CI | Mean fills |', '|---|---|---:|---|---:|']
++    for r in absum:
++        if r['candidate']=='no_trade':continue
++        lo,hi=r['excess_ci95'];lines.append(f'| {r["week"]} | {r["candidate"]} | ${r["mean_excess_no_trade"]:.2f} | [{lo:.2f}, {hi:.2f}] | {r["mean_fills"]:.1f} |')
++    lines+=['','## Profitability and robustness ranking','']
++    rankings=[]
++    for week in (5,9):
++        active=[r for r in summary if r['week']==week and r['stress']=='base' and r['strategy'] in ('event_momentum','post_halt','market_making','basket') and r['availability']=='enabled']
++        for r in active:
++            stress_rows=[x for x in summary if x['week']==week and x['candidate']==r['candidate'] and x['stress']!='base']
++            safe=not (r['liquidations'] or r['position_violations'] or r['same_tick_fills'])
++            robust=(safe and r['mean_fills']>0 and r['excess_ci95'][0]>0 and len(stress_rows)==3 and all(x['excess_ci95'][0]>0 and not (x['liquidations'] or x['position_violations']) for x in stress_rows))
++            rankings.append({**r,'robust_positive':robust,'safe':safe})
++        ordered=sorted([r for r in rankings if r['week']==week],key=lambda r:(not r['safe'],not r['robust_positive'],-r['mean_excess_no_trade']))
++        lines.append(f'Week {week} (safety first; positive CI in base and all three stresses outranks an unstable mean):')
++        for rank,r in enumerate(ordered,1):
++            status=('positive CI in base and all stresses' if r['robust_positive'] else 'inactive / no demonstrated edge' if not r['mean_fills'] else 'positive mean but not robust' if r['mean_excess_no_trade']>0 else 'lost versus no-trade')
++            lines.append(f'{rank}. {r["candidate"]}: ${r["mean_excess_no_trade"]:.2f} mean excess; {status}.')
++        if not any(r['robust_positive'] for r in ordered):lines.append('No strategy demonstrates robust positive trading alpha under these tests.')
++        lines.append('')
++    (out/'rankings.json').write_text(json.dumps(rankings,indent=2))
++    # Condition analysis uses held-out strata only, without retuning.
++    conditions=[]
++    no_trade={(r['week'],r['stress'],r['seed']):r['pnl'] for r in oos if r['candidate']=='no_trade'}
++    for week in (5,9):
++        for name in ('event_momentum','post_halt','market_making','basket','combined'):
++            for spread in sorted({r['spread_bps'] for r in oos}):
++                group=[r for r in oos if r['week']==week and r['candidate']==name and r['spread_bps']==spread]
++                if group:conditions.append({'week':week,'strategy':name,'spread_bps':spread,'n':len(group),'mean_excess':float(np.mean([r['pnl']-no_trade[(week,'base',r['seed'])] for r in group])),'mean_fills':float(np.mean([r['fills'] for r in group]))})
++    (out/'conditions.json').write_text(json.dumps(conditions,indent=2))
++    confirmation=out/'portfolio_confirmation'
++    confirm_rows=load(confirmation/'results.json')+load(confirmation/'stress.json')
++    if confirm_rows:
++        definition=json.loads((confirmation/'definition.json').read_text())
++        wanted=set(definition['seeds'])
++        for week in (5,9):
++            for stress in ('base','fees_60bps','latency_3ticks','volatile'):
++                for name in ('combined_profit','original','no_trade'):
++                    actual={r['seed'] for r in confirm_rows if r['week']==week and r['stress']==stress and r['candidate']==name}
++                    if actual!=wanted:raise SystemExit(f'Incomplete independent portfolio confirmation: W{week}, {stress}, {name}')
++        confirmation_summary=aggregate(confirm_rows)
++        (out/'portfolio_confirmation_summary.json').write_text(json.dumps(confirmation_summary,indent=2))
++        lines+=['','## Independent profit-ranked portfolio confirmation','',
++            'Momentum plus market making was chosen by calibration mean excess, following the primary study. It is evaluated on 50 new seeds (2000–2049), not reused primary-study seeds. All sleeves share one total capital allocation and team constraints.',
++            '', '| Week | Strategy | Regime | Mean account P&L | Mean excess | Excess 95% CI |', '|---|---|---|---:|---:|---|']
++        for r in confirmation_summary:
++            lo,hi=r['excess_ci95']
++            lines.append(f'| {r["week"]} | {r["candidate"]} | {r["stress"]} | ${r["mean_pnl"]:.2f} | ${r["mean_excess_no_trade"]:.2f} | [{lo:.2f}, {hi:.2f}] |')
++    history=load(out/'historical_funded.json') or load(out/'historical.json')
++    if history and any(r.get('historical_fixture')!='funded_providers_v3' for r in history):
++        raise SystemExit('Historical background inventory is unaudited; run scripts/alpha_history.py.')
++    if history:
++        lines+=['','## Secondary historical taker replay','', 'This is not an exact queue reconstruction. Maker performance is intentionally not estimated. These earlier-week tapes contain no halt/resume pair and do not enable ARENA10 futures. Week 4 is chronologically later than Weeks 2–3. These tapes were inspected during engineering and are supplementary diagnostics, not a pristine historical holdout. No historical tape is used for parameter selection.', '', '| Recording | Strategy | Account P&L | Excess versus no-trade | Fills |', '|---|---|---:|---:|---:|']
++        baselines={r['file']:r['pnl'] for r in history if r['strategy']=='no_trade'}
++        for r in history:lines.append(f'| {Path(r["file"]).name} | {r["strategy"]} | ${r["pnl"]:.2f} | ${r["pnl"]-baselines[r["file"]]:.2f} | {r["fills"]} |')
++    lines+=['','## Interpretation and limits','',
++        '* Positive account P&L is not automatically alpha. Use excess over the paired no-trade account, which holds the same initial grants and earns the same configured cash interest.',
++        '* Synthetic seeds are independent price/event/flow draws, not 50 independent historical trading days. External liquidity and taker behavior are modeled; actual hosted profitability is unproven.',
++        '* The actual order book supplies price-time priority, partial fills, stale resting quotes and cancellations; there is no touch-price fill shortcut. Commands execute no sooner than the next tick, before a new decision.',
++        '* Futures are disabled in Week 5. Week 9 is a separate common-universe comparison; the original Week 5 bot intentionally remains inactive outside Week 5.',
++        '* All equity strategies retain long-only stock inventory, per-seat caps, a 60% projected cash reserve and min(40% capital, $70k) gross bound at new-risk entry. Subsequent fees, price moves and futures variation can change those balances. The basket can short a capped cash-settled future in Week 9. Hedge legs are non-atomic and delayed; hedge failures and residual overlays are recorded.',
++        '* P&L is conservatively marked by the real exchange. Fees/rebates/carry and actual cancellation charges are included once, not subtracted again. The fee audit replays maker runs, checks identical P&L/fill counts, and extracts authoritative total charges; trade commissions remain separately available. Slippage is a separate diagnostic relative to the decision mid. Sharpe is a session statistic, not annualized. Win rate is for FIFO closing fills including costs.',
++        '* Baseline no-trade receives no special liquidation at the end. Trading sleeves try to return to their initial inventory during the final 12 ticks; halts or lack of liquidity can prevent this, and remaining overlay is reported.',
++        '* Bootstrap intervals resample paired seeds, conditional on the generator. Multiple strategies are compared; the intervals are descriptive and are not a guarantee or a multiple-testing-adjusted discovery claim.',
++        '* No hosted connection or live order is used. The proven live bot files and .env are unchanged.',
++        '']
++    if not (out/'stress.json').exists():lines+=['**Stress studies have not been executed yet.**','']
++    if history:
++        baselines={r['file']:r['pnl'] for r in history if r['strategy']=='no_trade'}
++        momentum=[r for r in history if r['strategy']=='event_momentum']
++        lines+=['','## Diagnosis','', 'The synthetic generator preserves the exchange calendar ramps and a simplified liquidity population. Success under those seeds is conditional on that structure, not proof of prediction in a live market.', '', 'Historical momentum diagnostics (same order paths, fees added back only for cost attribution):', '', '| Recording | After-fee excess | Fill commissions | Excess plus those commissions |', '|---|---:|---:|---:|']
++        for r in momentum:
++            excess=r['pnl']-baselines[r['file']]
++            lines.append(f'| {Path(r["file"]).name} | ${excess:.2f} | ${r["commissions"]:.2f} | ${excess+r["net_fees"]:.2f} |')
++        lines+=['', 'Adding fees back does not rerun a zero-fee strategy or remove market impact/cash-interest differences. Here the historical deficit is not explained by commissions alone; delayed price confirmation did not produce enough subsequent continuation on these recorded books.', '', 'Post-halt reversion has few eligible trades: the actual five-minute halt is much longer than the default 15-tick news ramp, and the permanent-earnings filter excludes most large displacements. The remaining trades do not establish a positive edge.', '', 'Market-making gains depend substantially on rebates and the modeled taker population. The historical tapes cannot verify its maker queues, and the Week 5 latency interval crosses zero. Fee-insensitive simulated flow is a material assumption.', '', 'Basket residual z-scores do not establish a stationary relationship. After the cost gate, integer futures sizing and non-atomic legs, the few executed trades have negative average excess. There is no profitable basket result to promote.', '', 'The original Week 5 bot remains the strongest tested Week 5 baseline. The new strategies and profit-ranked portfolio are not installed into the live bots. No new strategy has demonstrated historical-validated profitability from these inputs.', '']
++    (out/'REPORT.md').write_text('\n'.join(lines))
++    if not args.no_charts:charts(out,summary,oos)
++    print('\n'.join(lines[:27]));print(f'Full results: {out/"REPORT.md"}')
++
++
++if __name__=='__main__':main()
+diff --git a/tests/test_alpha.py b/tests/test_alpha.py
+new file mode 100644
+index 0000000..d4583ed
+--- /dev/null
++++ b/tests/test_alpha.py
+@@ -0,0 +1,289 @@
++"""Causality, real matching/fees/queues and isolated alpha risk regressions."""
++import asyncio
++from dataclasses import replace
++from pathlib import Path
++
++import pytest
++
++from team.alpha.core import Observation,Quote,PublicEvent,Intent
++from team.alpha import EventMomentum,PostHaltReversion,AdaptiveMarketMaker,BasketArbitrage
++from alpha_lab.runner import isolated,run_one,default_cash
++from alpha_lab.exchange import OfflineExchange,Receiver
++from alpha_lab.risk import Gateway
++from exchange.server import Portfolio
++from shared.messages import PlaceOrder,CancelOrder,TradeExecution
++
++
++def obs(t,price=100,events=(),positions=None,**kw):
++    return Observation(t,{'NFLX':Quote(price-.01,price+.01,20,20)},positions or {},175000,175000,175000,
++        events=events,**kw)
++
++
++def test_event_momentum_requires_public_event_and_confirmation():
++    plain=EventMomentum(confirmation=3)
++    for t,p in enumerate((100,101,102,103)):
++        assert not plain.observe(obs(t,p))
++    a=EventMomentum(confirmation=3)
++    assert not a.observe(obs(0,100,(PublicEvent('CALENDAR_EVENT',0,('NFLX',),'earnings'),)))
++    assert not a.observe(obs(1,101))
++    assert not a.observe(obs(2,102))
++    result=a.observe(obs(3,103))
++    assert result and result[0].side=='buy'
++
++
++def test_cost_gate_rejects_sub_fee_edge():
++    a=EventMomentum(confirmation=3)
++    for t,p in enumerate((100,100.05,100.10,100.15)):
++        events=(PublicEvent('CALENDAR_EVENT',0,('NFLX',),'earnings'),) if t==0 else ()
++        assert not a.observe(obs(t,p,events))
++
++
++def test_future_perturbation_cannot_change_prefix_signals():
++    def run(future):
++        a=EventMomentum(confirmation=3)
++        signals=[]
++        for t,p in enumerate([100,101,102,103]+future):
++            e=(PublicEvent('CALENDAR_EVENT',0,('NFLX',),'earnings'),) if t==0 else ()
++            signals.append(a.observe(obs(t,p,e)))
++        return signals
++    assert run([80,70])[:4]==run([120,130])[:4]
++
++
++@pytest.mark.parametrize('cls',[EventMomentum,PostHaltReversion,AdaptiveMarketMaker,BasketArbitrage])
++def test_no_orders_on_halted_symbol(cls):
++    a=cls()
++    for t in range(20):a.observe(obs(t,100+t))
++    intents=a.observe(obs(20,130,halted=frozenset({'NFLX'})))
++    assert not [i for i in intents if not i.cancel]
++
++
++def test_post_halt_uses_strictly_lagged_reference_and_reversal():
++    a=PostHaltReversion(z=2.5)
++    for t in range(40):a.observe(obs(t,100))
++    a.observe(obs(40,90,(PublicEvent('TRADING_HALT',40,('NFLX',)),),halted=frozenset({'NFLX'})))
++    assert all(p==100 for _,p in a.halt_reference['NFLX'])
++    a.observe(obs(340,90,(PublicEvent('TRADING_RESUMED',340,('NFLX',)),)))
++    a.observe(obs(341,90.1));a.observe(obs(342,90.2))
++    result=a.observe(obs(343,90.4))
++    assert result and result[0].side=='buy'
++
++
++def test_post_halt_rejects_recent_earnings_repricing():
++    a=PostHaltReversion(z=2.5)
++    for t in range(40):a.observe(obs(t,100))
++    a.observe(obs(40,90,(PublicEvent('CALENDAR_EVENT',40,('NFLX',),'earnings'),PublicEvent('TRADING_HALT',40,('NFLX',)))))
++    a.observe(obs(340,90,(PublicEvent('TRADING_RESUMED',340,('NFLX',)),)))
++    for t,p in [(341,90.1),(342,90.2),(343,90.4)]:assert not a.observe(obs(t,p))
++
++
++def test_basket_is_unavailable_when_future_is_disabled():
++    a=BasketArbitrage()
++    for t in range(150):assert not a.observe(obs(t,100+t*.1))
++
++
++def test_post_only_quotes_and_inventory_size():
++    a=AdaptiveMarketMaker()
++    intents=a.observe(obs(4,positions={'NFLX':20},cap=20))
++    assert not [i for i in intents if i.side=='buy' and not i.cancel]
++    assert all(i.order_type=='post_only' for i in intents if not i.cancel)
++
++
++def test_real_exchange_next_tick_fill_and_actual_fee():
++    async def run():
++        with isolated(77,5,175000,1) as (_,scenario,accounts):
++            s=OfflineExchange();s.set_scenario(scenario);s.session_open=True;s.ref_prices['NFLX']=100
++            account=accounts[0]
++            s.portfolios[account]=Portfolio(team_id=account,role='trader',level=1,cash=175000)
++            s.portfolios['liquidity']=Portfolio(team_id='liquidity',role='broker',level=1,cash=1e6)
++            s.clients[account]=account
++            rx=Receiver(account);rx.current=s;s.receivers[account]=rx
++            s.books['NFLX'].place_order('liquidity','sell',100,2)
++            g=Gateway(s,account,rx,175000)
++            g.schedule([Intent('NFLX','buy',2,101)],obs(10))
++            s.tick=10;await g.execute_due(10)
++            assert not rx.fills
++            # Signal-time ask is removed; actual next-tick resting price wins.
++            s.books['NFLX'].cancel_team_orders('liquidity')
++            s.books['NFLX'].place_order('liquidity','sell',100.50,1)
++            s.tick=11;await g.execute_due(11)
++            assert len(rx.fills)==1
++            assert rx.fills[0]['price']==100.50 and rx.fills[0]['quantity']==1
++            assert rx.fills[0]['fee']==pytest.approx(.003*100.50)
++            assert s.portfolios[account].positions['NFLX']==1
++    asyncio.run(run())
++
++
++def test_real_queue_priority_partial_fill_and_rebate():
++    async def run():
++        with isolated(78,5,175000,1) as (_,scenario,accounts):
++            s=OfflineExchange();s.set_scenario(scenario);s.session_open=True;s.ref_prices['NFLX']=100
++            account=accounts[0];rx=Receiver(account);rx.current=s;s.receivers[account]=rx;s.clients[account]=account
++            for name,role in [(account,'broker'),('liquidity','broker'),('flow','trader')]:
++                s.portfolios[name]=Portfolio(team_id=name,role=role,level=1,cash=1e6)
++            s.portfolios['flow'].positions['NFLX']=20
++            # Existing liquidity is ahead at the same price.
++            s.books['NFLX'].place_order('liquidity','buy',100,3)
++            g=Gateway(s,account,rx,175000,cap=20)
++            g.schedule([Intent('NFLX','buy',2,100,'post_only')],obs(1))
++            s.tick=2;await g.execute_due(2)
++            await s._handle_place_order('flow',PlaceOrder(team_id='flow',symbol='NFLX',side='sell',
++                quantity=4,price=100,order_type='ioc'),'flow')
++            assert s.portfolios['liquidity'].positions['NFLX']==3
++            assert s.portfolios[account].positions['NFLX']==1
++            assert rx.fills[-1]['maker']
++            assert rx.fills[-1]['rebate']==pytest.approx(.001*100)
++            assert rx.pending['NFLX','buy'].quantity==1
++    asyncio.run(run())
++
++
++def test_pending_buy_and_cancel_remain_reserved():
++    with isolated(79,5,175000,1) as (_,scenario,accounts):
++        s=OfflineExchange();s.set_scenario(scenario);s.session_open=True;s.ref_prices['NFLX']=100
++        a=accounts[0];s.portfolios[a]=Portfolio(team_id=a,role='trader',level=1,cash=175000)
++        r=Receiver(a);g=Gateway(s,a,r,175000,cap=10)
++        for _ in range(20):g.schedule([Intent('NFLX','buy',10,100)],obs(1))
++        assert len(r.pending)==1 and r.pending['NFLX','buy'].quantity==10
++        g.schedule([Intent('NFLX','buy',0,0,cancel=True)],obs(2))
++        assert r.pending['NFLX','buy'].quantity==10
++
++
++def test_cash_floor_and_no_stock_shorts():
++    with isolated(80,5,175000,1) as (_,scenario,accounts):
++        s=OfflineExchange();s.set_scenario(scenario);s.session_open=True;s.ref_prices['NFLX']=100
++        a=accounts[0];s.portfolios[a]=Portfolio(team_id=a,role='trader',level=1,cash=105050)
++        r=Receiver(a);g=Gateway(s,a,r,175000)
++        assert g.allowed_quantity(Intent('NFLX','buy',10,100))==0
++        assert g.allowed_quantity(Intent('NFLX','sell',10,100))==0
++
++
++def test_seed_reproducibility_and_global_config_restoration():
++    import exchange.config as cfg
++    original_fee=cfg.TAKER_FEE_RATE
++    a=asyncio.run(run_one(99,[('event_momentum',{})],ticks=100))
++    b=asyncio.run(run_one(99,[('event_momentum',{})],ticks=100))
++    assert a==b
++    assert cfg.TAKER_FEE_RATE==original_fee
++    assert not a['same_tick_fills'] and not a['position_violations']
++
++
++def test_live_source_hashes_are_unchanged():
++    import hashlib,json
++    root=Path(__file__).resolve().parents[1]
++    protocol=root/'alpha_results/study/protocol.json'
++    if not protocol.exists():pytest.skip('No experiment protocol yet')
++    d=json.loads(protocol.read_text())
++    for name in ('trader','broker'):
++        assert hashlib.sha256((root/f'team/{name}.py').read_bytes()).hexdigest()==d[f'live_{name}_sha256']
++
++
++def test_partial_stock_leg_scales_delayed_futures_hedge():
++    async def run():
++        with isolated(81,9,175000,1) as (_,scenario,accounts):
++            s=OfflineExchange();s.set_scenario(scenario);s.session_open=True
++            a=accounts[0];rx=Receiver(a);rx.current=s;s.receivers[a]=rx;s.clients[a]=a
++            for name,role in [(a,'trader'),('liquidity','broker')]:
++                s.portfolios[name]=Portfolio(team_id=name,role=role,level=1,cash=175000)
++            s.ref_prices['NVDA']=100;s.ref_prices['ARENA10']=300
++            for sym,ref in [('NVDA',100),('ARENA10',300)]:
++                s.price_engines[sym].fair_value=s.price_engines[sym].market_price=ref
++            s.books['NVDA'].place_order('liquidity','sell',100,1)
++            s.books['ARENA10'].place_order('liquidity','buy',300,10)
++            o=replace(obs(1),quotes={'NVDA':Quote(99,100,10,1),'ARENA10':Quote(300,301,10,10)},futures_enabled=True)
++            g=Gateway(s,a,rx,175000)
++            g.schedule([Intent('NVDA','buy',3,100,group='hedge'),Intent('ARENA10','sell',3,300,group='hedge')],o)
++            s.tick=2;await g.execute_due(2)
++            assert s.portfolios[a].positions['NVDA']==1
++            assert s.portfolios[a].positions.get('ARENA10',0)==0
++            s.tick=3;await g.execute_due(3)
++            assert s.portfolios[a].positions['ARENA10']==-1
++            assert not g.position_violations
++    asyncio.run(run())
++
++
++def test_week5_future_gate_is_enforced_by_real_exchange():
++    async def run():
++        with isolated(82,5,175000,1) as (_,scenario,accounts):
++            s=OfflineExchange();s.set_scenario(scenario);s.session_open=True
++            a=accounts[0];s.portfolios[a]=Portfolio(team_id=a,role='trader',level=1,cash=175000)
++            rx=Receiver(a);s.receivers[a]=rx
++            await s._handle_place_order(a,PlaceOrder(team_id=a,symbol='ARENA10',side='buy',
++                quantity=1,price=s.ref_prices['ARENA10'],order_type='ioc'),a)
++            assert rx.errors['FUTURES_LOCKED']==1
++    asyncio.run(run())
++
++
++def test_stale_post_only_quote_rejects_instead_of_optimistic_fill():
++    async def run():
++        with isolated(83,5,175000,1) as (_,scenario,accounts):
++            s=OfflineExchange();s.set_scenario(scenario);s.session_open=True;s.ref_prices['NFLX']=100
++            a=accounts[0];s.portfolios[a]=Portfolio(team_id=a,role='broker',level=1,cash=175000)
++            rx=Receiver(a);rx.current=s;s.receivers[a]=rx
++            g=Gateway(s,a,rx,175000)
++            g.schedule([Intent('NFLX','buy',2,100,'post_only')],obs(1))
++            s.books['NFLX'].place_order('liquidity','sell',99.9,20)
++            s.tick=2;await g.execute_due(2)
++            assert rx.errors['POST_ONLY_CROSS']==1
++            assert not rx.fills and not rx.pending
++    asyncio.run(run())
++
++
++def test_fill_before_cancel_confirmation_keeps_correct_reservation():
++    async def run():
++        with isolated(84,5,175000,1) as (_,scenario,accounts):
++            s=OfflineExchange();s.set_scenario(scenario);s.session_open=True;s.ref_prices['NFLX']=100
++            a=accounts[0];rx=Receiver(a);rx.current=s;s.receivers[a]=rx;s.clients[a]=a
++            for name,role in [(a,'broker'),('flow','trader')]:
++                s.portfolios[name]=Portfolio(team_id=name,role=role,level=1,cash=175000)
++            s.portfolios['flow'].positions['NFLX']=10
++            s.price_engines['NFLX'].fair_value=s.price_engines['NFLX'].market_price=s.price_engines['NFLX'].session_open=100
++            g=Gateway(s,a,rx,175000,cap=10)
++            g.schedule([Intent('NFLX','buy',10,100,'post_only')],obs(1))
++            s.tick=2;await g.execute_due(2)
++            g.schedule([Intent('NFLX','buy',0,0,cancel=True)],obs(2))
++            await s._handle_place_order('flow',PlaceOrder(team_id='flow',symbol='NFLX',side='sell',
++                price=100,quantity=3,order_type='ioc'),'flow')
++            assert rx.pending['NFLX','buy'].quantity==7
++            assert s.portfolios[a].positions['NFLX']==3
++            g.sample_risk();assert not g.position_violations
++            s.tick=3;await g.execute_due(3)
++            assert not rx.pending
++            assert g.allowed_quantity(Intent('NFLX','buy',20,100))==7
++    asyncio.run(run())
++
++
++def test_report_pairs_each_strategy_with_same_seed_benchmark():
++    from scripts.alpha_report import confidence
++    assert confidence([2.,2.,2.])==[2.,2.]
++
++
++def test_historical_long_only_liquidity_has_funded_offers(monkeypatch):
++    from scripts.alpha_history import run_repaired
++    import alpha_lab.history as hist
++    from plugins.securities.futures import INDEX_MEMBERS
++    tape=[]
++    for t in range(1,9):
++        books={sym:{'type':'book_snapshot','symbol':sym,'ref_price':100+t,
++            'bids':[[100+t-.05,30]],'asks':[[100+t+.05,30]]} for sym in INDEX_MEMBERS}
++        events=[{'type':'session_event','event':'CALENDAR_EVENT','message':'public',
++            'data':{'kind':'earnings','affected':['NFLX']}}] if t==1 else []
++        tape.append((t,{'books':books,'events':events}))
++    monkeypatch.setattr(hist,'frames',lambda _:tape)
++    r=asyncio.run(run_repaired('session_week02_fixture.jsonl','event_momentum',{'confirmation':3,'holding':20}))
++    assert r['fills']>0
++    assert r['background_initial_inventory']==200 and not r['same_tick_fills']
++
++
++def test_historical_orders_wait_for_recorded_session_open(monkeypatch):
++    from scripts.alpha_history import run_repaired
++    import alpha_lab.history as hist
++    from plugins.securities.futures import INDEX_MEMBERS
++    tape=[]
++    for t in range(1,8):
++        books={sym:{'type':'book_snapshot','symbol':sym,'ref_price':100,
++            'bids':[[99.95,30]],'asks':[[100.05,30]]} for sym in INDEX_MEMBERS}
++        events=[{'type':'session_event','event':'SESSION_OPEN','message':'open','data':{}}] if t==4 else []
++        tape.append((t,{'books':books,'events':events}))
++    monkeypatch.setattr(hist,'frames',lambda _:tape)
++    r=asyncio.run(run_repaired('session_week02_fixture.jsonl','buy_hold',{}))
++    assert r['recorded_session_phases_enforced']
++    assert r['first_fill_tick']>=5
+diff --git a/requirements-alpha.txt b/requirements-alpha.txt
+new file mode 100644
+index 0000000..3466e5c
+--- /dev/null
++++ b/requirements-alpha.txt
+@@ -0,0 +1,2 @@
++-r requirements.txt
++matplotlib>=3.7,<4
+diff --git a/ALPHA_README.md b/ALPHA_README.md
+new file mode 100644
+index 0000000..28ef018
+--- /dev/null
++++ b/ALPHA_README.md
+@@ -0,0 +1,206 @@
++# Offline AlgoArena alpha research
++
++The live `team/trader.py`, `team/broker.py`, `.env`, registration, and existing
++Week 5 risk controls are not modified by this work. New strategy imports never
++start a live connection. The experiment calls the real local exchange directly,
++using isolated accounts and temporary roster/persistence files. It does not use
++`season_sim.py` presets as a substitute for our strategy implementations.
++
++## Reproduce
++
++Use the existing isolated Python 3.10 environment:
++
++```sh
++.venv310/bin/python -m pip install -r requirements-alpha.txt
++.venv310/bin/python scripts/alpha_backtest.py --output alpha_results/study --workers 4
++.venv310/bin/python scripts/alpha_portfolio.py --input alpha_results/study --workers 2
++.venv310/bin/python scripts/alpha_fee_audit.py --input alpha_results/study --workers 4
++.venv310/bin/python scripts/alpha_report.py --input alpha_results/study
++.venv310/bin/python -m pytest -q tests/test_alpha.py
++make test
++```
++
++A full study is substantial: 624 calibration runs, 800 base held-out runs,
++550 held-out ablations, 2,400 stress runs, 8 fixed-seed illustrative paths, and
++15 secondary historical replays. The independent profit-ranked portfolio
++confirmation adds 1,400 runs on another 50 seeds (2000–2049). A read-only
++fee audit replays 450 fee-bearing maker runs to extract total charges and
++verify matching P&L/fill counts. It uses 12 calibration seeds (0–11) and 50
++held-out seeds (1000–1049), repeated across regimes. The primary study has 62 independent
++seed identities (112 including portfolio confirmation), **not thousands of independent historical sessions**.
++
++Stages can be run independently, with the same ticks/cash and frozen source:
++
++```sh
++.venv310/bin/python scripts/alpha_backtest.py --stage calibrate --output alpha_results/reproduction
++.venv310/bin/python scripts/alpha_backtest.py --stage evaluate --output alpha_results/reproduction
++.venv310/bin/python scripts/alpha_backtest.py --stage stress --output alpha_results/reproduction
++.venv310/bin/python scripts/alpha_backtest.py --stage history --output alpha_results/reproduction
++.venv310/bin/python scripts/alpha_report.py --input alpha_results/reproduction
++```
++
++Use a new output directory for a different protocol. The source hash check
++rejects changes between calibration and evaluation. Earlier development results
++in other `alpha_results` subdirectories are superseded; the delivered study is
++`alpha_results/study`.
++
++## Strategies
++
++* `team/alpha/event_momentum.py`: only observed CALENDAR_EVENT releases activate
++  it. Price direction comes from post-event quotes, not the public pct/target.
++  Tests confirmations 3/5/10/15, holding 20/40/60/120, and trailing multipliers
++  2/4. The cost gate includes a causal next-tick slippage allowance, two taker
++  fees, spread, exit allowance, and safety margin. Entry limits stay fixed while
++  the order travels. Negative momentum sells held inventory; it does not create
++  new equity shorts.
++* `team/alpha/post_halt.py`: records a lagged pre-halt reference; after resume,
++  requires reversal and z=2.5/3/3.5/4. Recent earnings repricing is excluded.
++  Only actual observed halt/resume events activate it. Zero eligible trades is
++  a legitimate result, not substituted with a fictional fade.
++* `team/alpha/market_making.py`: post-only quotes combine mid, microprice,
++  imbalance, and lagged trend, then apply inventory skew, volatility/trend
++  adverse-selection protection, dynamic spread/size, news cooldown and halt
++  gates. Adverse selection here is a conservative volatility/trend proxy, not
++  an oracle estimate of future toxic flow. Queue position is determined by real
++  order IDs/sequence and competing orders. Partial fills and cancel latency are
++  retained; a cancel request does not immediately free a risk reservation.
++* `team/alpha/basket.py`: estimates rolling beta and residual z-score using
++  lagged data, with thresholds 2/2.5/3/3.5 and lookbacks 60/120. ARENA10 is the
++  arithmetic average of the ten equity **price levels**, not an equal-weighted
++  average of percentage returns. A stock leg and opposite index-future leg are
++  non-atomic; the future arrives another tick later, scaled to a partial stock
++  fill. Both legs pay real fees and post real futures margin. The strategy is
++  disabled in Week 5 because the exchange disables futures. Week 9 supplies the
++  separate futures-enabled comparison. Equity shorts remain disabled locally;
++  expensive residuals can only sell existing equity inventory.
++
++The basket uses the actual members in `engine/plugins/securities/futures.py`:
++AAPL, MSFT, NVDA, TSLA, AMZN, GOOGL, META, NFLX, AMD, INTC. Futures are gated
++by `futures_enabled`, use $40 initial margin per contract by default, and settle
++variation every 300 ticks. The actual configuration values remain the source
++of truth.
++
++## Market and execution model
++
++`alpha_lab/runner.py` drives `OfflineExchange`, a subclass that replaces only
++transport and wall-clock halt timers. Matching, price-time priority, partial
++fills, auction processing, calendar ramps, trade impact, stock borrow rules,
++price bands, carry, margin, liquidation and order quotas are inherited from
++`ExchangeServer`. Halt duration remains 300 virtual seconds; it is not shrunk
++to 0.05 seconds as in the existing headless season simulator.
++
++The simulator uses the four liquid/event-relevant equities AAPL, NVDA, NFLX,
++AMD, plus ARENA10 when enabled. The index still derives from all ten equities,
++and starting grants/marks include all equities. This is a restricted trading
++universe, not a claim to optimize every security.
++
++Each candidate has a separate exchange. No candidate trades against another
++candidate. Background liquidity has a separate funded provider for each active
++symbol; each provider is subject to the actual per-team quota. An independently
++seeded flow trader sometimes follows already observed price changes. Spread,
++quote lifetime, displayed depth, volatility, event sign and event magnitude
++vary by seed. Spread levels 4/12/30 bps cover the historical median-to-tail
++range; vol multipliers 0.5/1/2/4 include deliberately harsher regimes. Actual
++orders affect subsequent venue marks through the real price-impact engine.
++Background agents are modeled populations, not reconstructed hosted traders.
++
++A decision at tick t can execute no earlier than t+1, on the next book after
++background quote updates. Its limit does not adapt to the unseen next quote.
++Post-only orders can be rejected if stale quotes cross on arrival. Liquidity
++consumed by one order is unavailable to later orders until real new quotes
++arrive. Cancellations use the real handler and remain reserved in flight.
++The serialized offline dispatcher can inspect completion after a handler
++returns; this is not a new cancellation guarantee for the hosted protocol.
++
++Starting cash is $175,000 from `team.config.CAPITAL['6_rings_trader_1']` for all
++standalone candidates, including the broker research sleeve, to avoid capital
++bias. This is a common research budget, not the full $350k live broker capital.
++Opening grants use the real roster division across three seats: six shares per
++name. A combined portfolio splits both cash and grants, rather than multiplying
++them. Independent allocations enforce 150 equity shares per symbol (20 for
++market making), at least 60% projected cash at new-risk entry, at most min(40% capital, $70k) gross at entry,
++no new risk below 70% equity, and no equity shorts. Futures have a separate
++20-contract ceiling and are counted at full notional in our risk bound, in
++addition to actual exchange margin. Outstanding orders reserve each budget.
++
++The baseline 30-bps taker fee is an explicit required override; the local code's
++built-in default is 15 bps. Maker rebates use the actual configured rate and
++venue-net cap. The report saves both commissions and rebates. A 60-bps stress
++repeats the experiments. Other stresses use three-tick order latency and doubled
++fundamental volatility plus 1.5x event magnitudes and doubled spreads.
++
++## Evaluation and interpretation
++
++Calibration chooses each strategy by mean **paired excess over no-trade** minus
++half its standard deviation; safety failures receive a large penalty. Basket
++parameters are calibrated in Week 9, the other three in Week 5. Parameters are
++frozen before seeds 1000–1049 are run. The combined portfolio uses the top two
++Week 5 calibration strategies with equal cash sleeves and shared team limits;
++it is not selected from held-out winners.
++
++The original baseline runs `MyTrader.on_tick` and its real `_Bot._place_order`
++risk method, using a virtual clock and offline transport. That original bot
++intentionally gates itself to Week 5 and is inactive in Week 9. Buy-and-hold is
++risk-constrained and buys only the restricted tradable equity universe.
++No-trade holds its original grant and cash. All baselines share the initial
++endowment and cash allocation. No-trade earns actual configured cash interest.
++Positive account P&L can therefore coexist with negative trading alpha.
++
++Metrics: conservative exchange MTM P&L, paired excess, fees/rebates/carry,
++decision-mid slippage, session Sharpe (not annualized), worst peak-to-trough
++drawdown, turnover, FIFO closing-fill win rate including costs, liquidations,
++position violations, pending/team share exposure and per-sleeve gross, hedge failures, unclosed overlay,
++and same-tick-fill checks. The final 12 ticks try to return trading sleeves to
++their initial inventory; a halt or empty book may prevent that. Such inventory
++is marked, not magically closed at a signal price.
++
++Bootstrap intervals resample paired seed outcomes. They describe this generator,
++not live-exchange certainty, and are not multiple-comparison-adjusted discovery
++claims. Conditions and ablations are reported without selecting new parameters.
++
++The Week 2–4 historical tapes are separate diagnostic replays, not a pristine
++holdout: they were inspected during engineering. At most three recorded levels
++are reconstructed and taker participation is capped at 10% of the visible
++touch. Execution uses a later observed book. Recorded prints are not recycled
++as extra liquidity. Maker fills are deliberately not estimated because exact
++historical queues cannot be recovered from the market-only tapes. The IPO and
++full participant responses are not reconstructed. These results are secondary,
++and cannot validate Week 5 breakers or Week 9 futures absent in the recordings.
++
++## Results and artifacts
++
++After execution, `alpha_results/study/REPORT.md` contains the numerical ranking,
++stress tests, ablations, historical diagnostics and limitations. CSV and JSON
++files preserve every seed/candidate result and parameter choice. PNG charts
++show paired held-out profitability, stress behavior, calibration sensitivity,
++and a fixed illustrative seed rather than a cherry-picked winner.
++
++No result from this research automatically changes or launches the live bot.
++
++The first combined portfolio uses calibration risk-adjusted scores. A second
++profit-ranked momentum/market-making portfolio is tested on untouched seeds
++2000–2049 after the first study; its results are reported separately. This
++explicit confirmation split avoids calling a post hoc portfolio a fresh test
++on seeds already used to motivate its design. Canonical `total_net_fees` and
++`cancellation_fees_paid` include the fee audit; the original `net_fees` field
++is the fill-only fee diagnostic, retained for auditability. Both definitions
++are already reflected in account P&L, so do not subtract either again.
++
++Historical offers in the long-only Week 2/3 scenarios require real background
++stock inventory. `scripts/alpha_history.py` supplies 200 shares per provider
++and caps each reconstructed level at 60 shares, in addition to the 10%
++participation cap and three-level truncation. It does not bypass exchange
++risk checks. Recorded pre-open/open/close gates are enforced; no subject order
++is submitted outside continuous trading. This historical fixture correction is separate from the frozen
++primary model; its checksum is saved in each historical result.
++
++The final primary experiment covers 1,500 one-second ticks (an event-window
++study, not a full-hour live trial). Week 9 gives momentum/reversion access to
++the future too when public market-wide events affect it; market making
++explicitly stays in equities. Cancellation charges and futures variation can
++subsequently debit the entry cash reserve. Stops cannot execute through a halt.
++The final report preserves the negative historical momentum results and
++does not equate conditional simulated profitability with a validated live edge.
++
++To rerun only the historical diagnostics, use
++`.venv310/bin/python scripts/alpha_history.py --input alpha_results/study --workers 4`.
+diff --git a/ALPHA_FILES.md b/ALPHA_FILES.md
+new file mode 100644
+index 0000000..fba17d4
+--- /dev/null
++++ b/ALPHA_FILES.md
+@@ -0,0 +1,83 @@
++# Alpha research changes
++
++Existing `team/trader.py`, `team/broker.py`, `.env`, registration, and account
++state were not overwritten. Existing unrelated working-tree changes remain.
++The real exchange implementation was inspected and reused, not replaced.
++
++## Reusable strategies
++
++| Path | Purpose |
++|---|---|
++| `team/alpha/__init__.py` | Strategy registry; no live startup side effects. |
++| `team/alpha/core.py` | Causal observations/intents, rolling histories, position and exit plans. |
++| `team/alpha/event_momentum.py` | Post-public-event, price-confirmed momentum with explicit cost gate. |
++| `team/alpha/post_halt.py` | Lagged-reference reversion after an observed halt/resume and reversal. |
++| `team/alpha/market_making.py` | Post-only microprice/imbalance/trend quotes with inventory/volatility controls. |
++| `team/alpha/basket.py` | Lagged beta/residual spread trading with a real ARENA10 futures hedge. |
++
++## Offline exchange harness
++
++| Path | Purpose |
++|---|---|
++| `alpha_lab/__init__.py` | Offline package definition. |
++| `alpha_lab/data.py` | Historical recording inventory and safe market-data readers. |
++| `alpha_lab/exchange.py` | Real exchange with in-memory transport and virtual halt timers. |
++| `alpha_lab/risk.py` | Conservative reservation gateway, share/cash/gross/margin limits, delayed cancel/hedge execution. |
++| `alpha_lab/baselines.py` | Actual original bot adapter, constrained buy-and-hold, no-trade. |
++| `alpha_lab/metrics.py` | MTM P&L, trade fees, slippage, Sharpe, drawdown, turnover, closing-fill win rate and safety metrics. |
++| `alpha_lab/runner.py` | Isolated accounts/roster/persistence, real auctions/calendar/impact/carry, seeded external population. |
++| `alpha_lab/experiment.py` | Full parameter grids, frozen calibration selection, disjoint-seed batches, CSV/JSON exports. |
++| `alpha_lab/history.py` | Low-level historical taker-replay machinery; production entry points use the funded/phase-aware adapter below. |
++
++## Commands and dependencies
++
++| Path | Purpose |
++|---|---|
++| `scripts/__init__.py` | Regular package to avoid the third-party `scripts` namespace collision exposed by full-suite testing. |
++| `scripts/alpha_backtest.py` | Calibration, primary OOS, ablations, stresses, illustrative paths and historical workflow. |
++| `scripts/alpha_report.py` | Paired-seed confidence intervals, rankings, cost/risk tables, diagnoses and five PNG charts. |
++| `scripts/alpha_portfolio.py` | Profit-ranked portfolio confirmation on new seeds 2000–2049, with resume checks. |
++| `scripts/alpha_history.py` | Funded, bounded background inventory and recorded session-phase enforcement for historical replay. |
++| `scripts/alpha_fee_audit.py` | Authoritative maker cancellation-charge extraction, requiring reproduced P&L/fill counts. |
++| `requirements-alpha.txt` | Existing requirements plus Matplotlib; no change to live dependencies. |
++| `.gitignore` | Ignore report font caches and transient runner PID files. |
++
++## Tests and documentation
++
++* `tests/test_alpha.py` — 24 cases covering causal signals, fee gates, halt
++  eligibility, lagged references, earnings filtering, actual futures gating,
++  next-tick execution, FIFO queue priority, partial fills, rebates, stale
++  post-only rejection, cancellation races, concurrent reservations, partial
++  hedge sizing, cash/stock-short constraints, reproducibility, historical
++  funding/session phases and unchanged live source hashes.
++* `tests/conftest.py` — isolate the trader ledger directory before constructing
++  test bots; never load a real seat's saved ledger into an isolated test.
++* `ALPHA_README.md` — exact commands, design, constraints, assumptions and limitations.
++* `ALPHA_FILES.md` — this manifest.
++
++## Executed results
++
++`alpha_results/study/` is the final study. `alpha_results/development/` contains
++superseded engineering/calibration artifacts and is excluded from conclusions.
++
++* `protocol.json`, `frozen_selection.json`, `combined_definition.json` — source,
++  scenario, seed/cash/fee protocol and frozen parameters.
++* `calibration.{csv,json}` — 624 calibration runs; `sensitivity.{csv,json}` — all 50 parameter combinations.
++* `out_of_sample.{csv,json}` — 800 primary held-out runs.
++* `ablations.{csv,json}` — 550 held-out ablation runs.
++* `stress.{csv,json}` — 2,400 stress runs at doubled fees, three-tick latency, and higher volatility/events/spreads.
++* `portfolio_confirmation/` — 500 base and 900 stress runs on 50 fresh seeds, with an explicit portfolio definition.
++* `historical.{csv,json}` and `historical_funded.{csv,json}` — the same 15 final funded, phase-aware historical taker replays.
++* `fee_audit.{csv,json}` — 450 full maker-run replays with matching P&L/fill counts and actual cancellation charges.
++* `data_inventory.json` — recording coverage, market/event counts, observed spread/move statistics and file checksums.
++* `example_curves.json` — eight fixed-seed illustrative paths/fill details, not selected winners.
++* `validation.json` — independent seed splits, dataset counts, safety totals and unchanged live-source checks.
++* `summary.{csv,json}`, `rankings.json`, `conditions.json`, `ablation_summary.json`, `portfolio_confirmation_summary.json` — report data.
++* `REPORT.md` — numerical conclusions, all comparisons, costs, limitations and negative historical diagnostics.
++* `oos_profitability.png`, `stress_profitability.png`, `calibration_sensitivity.png`, `example_equity.png`, `portfolio_confirmation.png` — chart artifacts.
++
++`evidence/alpha-tests.xml` and `evidence/alpha-make-test.txt` record **317 passed,
++3 skipped**. The skips are explicit external AI/Yahoo/hosted-exchange smoke
++checks. `evidence/alpha-changes.patch` is the source/documentation diff for this
++work; it excludes unrelated changes, credentials, account state, generated
++result matrices and virtual environments.

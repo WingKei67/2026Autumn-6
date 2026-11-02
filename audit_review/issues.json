@@ -1,0 +1,162 @@
+[
+  {
+    "severity": "High",
+    "file": "engine/exchange/server.py",
+    "function": "ExchangeServer._handle_place_order / close_session",
+    "line": 1146,
+    "finding": "Held MOC orders are absent from book.open_quantity risk reservations; close_session injects them directly into the closing book without a new admission check. Verified Week 9 case: three individually valid 500-share MOC buys produce 1500 shares under a 1000-share team cap.",
+    "resolution": "Unfixed in original and buffered-settlement fixture; no audited alpha uses MOC and performance runs do not close the session. Must reserve held MOC exposure/cash and revalidate auction eligibility before using this order type."
+  },
+  {
+    "severity": "High",
+    "file": "engine/exchange/server.py",
+    "function": "ExchangeServer._handle_place_order",
+    "line": 1226,
+    "finding": "Matching removes liquidity before awaited ACK delivery, while portfolio settlement follows ACK. Concurrent seats can both validate against old team positions. Actual-handler regression produces 1000 shares from two 500-share buys under the Week 5 800-share team cap. Serialized backtests cannot reveal this race.",
+    "resolution": "Separate BufferedSettlementExchange serializes order mutation and buffers outbound delivery until settlement completes; regression rejects the second order. Full production tick/auction/transport coordination remains outside this fixture."
+  },
+  {
+    "severity": "High",
+    "file": "alpha_lab/risk.py",
+    "function": "Gateway.allowed_quantity",
+    "line": 45,
+    "finding": "A reducing flag depends only on initial sign; futures orders can cross flat and bypass the equity, cash and gross entry tests. Regression: short 1, buy 21 with zero cash allowed.",
+    "resolution": "CorrectedGateway clips reducing requests to flat; dedicated regression."
+  },
+  {
+    "severity": "High",
+    "file": "alpha_lab/risk.py",
+    "function": "Gateway.execute_due",
+    "line": 103,
+    "finding": "Rechecks server prices/cash/halt after transport delay and silently changes or discards the already-submitted payload. This is arrival-time privileged control, not ordinary exchange rejection.",
+    "resolution": "CorrectedGateway freezes non-contingent order payload; actual exchange decides arrival acceptance."
+  },
+  {
+    "severity": "High",
+    "file": "alpha_lab/risk.py",
+    "function": "Gateway.execute_due",
+    "line": 119,
+    "finding": "Cumulative group fills are reused across exit retries; minimum hedge of 1 can overhedge fractional first-leg fills. Failure of second-leg admission can leave an unhedged first leg.",
+    "resolution": "Fresh attempt IDs and round-to-zero implemented. Atomicity and bounded unwind remain unresolved."
+  },
+  {
+    "severity": "High",
+    "file": "alpha_lab/runner.py",
+    "function": "MarketPopulation.refresh / flow",
+    "line": 105,
+    "finding": "Synthetic liquidity anchors to the venue reference, with fixed TTL/depth and exogenous buy flow insensitive to actual fees. Our due orders always precede external flow. Matching is real but profitable counterparties are artificial.",
+    "resolution": "Fast quote refresh and no rebate stress tested separately; historical queue claims remain unsupported."
+  },
+  {
+    "severity": "High",
+    "file": "alpha_lab/runner.py",
+    "function": "run_one",
+    "line": 232,
+    "finding": "Last 12 ticks replace strategies, including the original, with an imposed unwind, while buy-and-hold is left marked. No actual closing auction. Exit/terminal costs are not identical between baselines.",
+    "resolution": "Preserved for reproducibility; disclose results as MTM under this terminal convention."
+  },
+  {
+    "severity": "High",
+    "file": "alpha_lab/baselines.py",
+    "function": "Original.observe_async",
+    "line": 45,
+    "finding": "Week gate explicitly disables original in Week 9. It cannot be presented as an active Week 9 baseline. Original also uses different position sizing and public event shape data.",
+    "resolution": "Label inactive Week 9 and avoid equal-risk/feature claims."
+  },
+  {
+    "severity": "Medium",
+    "file": "alpha_lab/baselines.py",
+    "function": "Original.observe_async",
+    "line": 39,
+    "finding": "The original strategy and outbound risk method execute, but the adapter gives direct portfolio snapshots each tick, clears inflight when gateway pending is empty, and does not feed regular leaderboards that advance _venue_tick. Its live wire/clock/recovery behavior is not reproduced.",
+    "resolution": "Preserve this adapter for exact reproduction and label it an adapted original-policy baseline, not an end-to-end production-bot backtest. Correct clocks/ACK delivery and matched terminal rules before an equal-risk strategy comparison."
+  },
+  {
+    "severity": "Medium",
+    "file": "engine/exchange/server.py",
+    "function": "Portfolio.net_worth / ExchangeServer._bidask_marks",
+    "line": 284,
+    "finding": "The venue marks an entire long/short inventory at best bid/ask without sweeping available depth; a tiny own quote can influence valuation. Positive MTM is not necessarily realizable liquidation P&L, especially with halted residual inventory. This matches venue accounting, not an implementation fee error.",
+    "resolution": "Report MTM explicitly, preserve open-overlay diagnostics and require depth-aware terminal liquidation/cash realization in a future matched-terminal study."
+  },
+  {
+    "severity": "Medium",
+    "file": "alpha_lab/metrics.py",
+    "function": "summarize",
+    "line": 7,
+    "finding": "Execution net_fees excludes cancellation fees; unadjusted exports understate costs in Week 9. Archived fee_audit later repairs saved total_net_fees, so distinguish raw function from amended reports.",
+    "resolution": "Independent metrics read actual portfolio fees less rebates, include cancellation debits."
+  },
+  {
+    "severity": "Medium",
+    "file": "alpha_lab/metrics.py",
+    "function": "summarize",
+    "line": 22,
+    "finding": "FIFO combines all sleeves before matching, allowing trades in different accounts to close each other. Win rate has no profit factor and omits cancellation/carry expense.",
+    "resolution": "Independent per-account overlay FIFO avoids cross-seat closes and arbitrary grant reference basis. The report also expenses period cancellation/carry in the profit-factor loss denominator; costs remain separately visible."
+  },
+  {
+    "severity": "Medium",
+    "file": "alpha_lab/metrics.py",
+    "function": "summarize",
+    "line": 45,
+    "finding": "max_gross is maximum sleeve exposure rather than simultaneous portfolio total. Per-tick boundary safety counters do not establish every-fill safety.",
+    "resolution": "Retain field as sleeve maximum; aggregate exposure measurement remains an explicit limitation."
+  },
+  {
+    "severity": "Medium",
+    "file": "alpha_lab/metrics.py",
+    "function": "summarize",
+    "line": 51,
+    "finding": "Same-tick counter excludes fills missing decision provenance. Zero is not evidence that every fill had valid provenance.",
+    "resolution": "Independent missing_fill_provenance counter exported."
+  },
+  {
+    "severity": "Medium",
+    "file": "team/alpha/core.py",
+    "function": "PositionStrategy.manage",
+    "line": 145,
+    "finding": "Stops and holding duration initialize from first observed inventory change and observed midpoint, not actual weighted execution prices/times. Delayed/partial fills change realized stop risk.",
+    "resolution": "Needs fill-aware plan state before live deployment; not silently changed during frozen test."
+  },
+  {
+    "severity": "Medium",
+    "file": "team/alpha/basket.py",
+    "function": "Basket.decide",
+    "line": 36,
+    "finding": "Beta is constrained positive without stationarity checks; log price residual z-score need not be mean reverting. Cost gate omits actual futures spread and integer hedge error.",
+    "resolution": "Keep experimental; no profitable claim. Disable until net edge and hedge repairs demonstrated."
+  },
+  {
+    "severity": "Medium",
+    "file": "team/alpha/market_making.py",
+    "function": "AdaptiveMarketMaker.decide",
+    "line": 32,
+    "finding": "Inventory skew targets half cap, so long exposure and spread/rebate earnings are mixed. Adverse-selection filter is a volatility/trend proxy, not a conditional fill-markout estimate.",
+    "resolution": "Compare with no-trade and rebate-off stress; true neutral sizing requires borrow/short policy changes."
+  },
+  {
+    "severity": "Medium",
+    "file": "alpha_lab/runner.py",
+    "function": "MarketPopulation.__init__",
+    "line": 108,
+    "finding": "Spread, depth, TTL and informedness all depend on seed modulo 3, so their marginal effects are confounded. Seed replication alone cannot identify spread sensitivity.",
+    "resolution": "Separate TTL intervention provided; independent factorial regime randomization remains future work."
+  },
+  {
+    "severity": "Medium",
+    "file": "alpha_lab/experiment.py",
+    "function": "select / run_batch",
+    "line": 87,
+    "finding": "Only 12 calibration seeds across 50 settings and many comparisons; bootstrap intervals condition on generator and ignore selection/multiple testing. Previously viewed OOS seeds cannot be reused as fresh evidence.",
+    "resolution": "Frozen parameters tested on seeds 3000-3049; no new optimization or positive live-alpha conclusion."
+  },
+  {
+    "severity": "Low",
+    "file": "alpha_lab/metrics.py",
+    "function": "summarize",
+    "line": 15,
+    "finding": "Session Sharpe scales by sqrt(number of ticks); it is not annualized and serial returns make standard iid inference unreliable. Fill win rate is not round-trip trade win rate.",
+    "resolution": "Explicit metric labels and paired seed-level inference in audit report."
+  }
+]

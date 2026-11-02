@@ -1,0 +1,26 @@
+[
+  {
+    "file": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/sessions/session_week02_20261009_204000.jsonl.gz",
+    "archive_input_present": false,
+    "local_present": true,
+    "expected_sha256": "b3af11d71034819c1405b0952a8c248e510794a470b82aa40c6db4159147b1b7",
+    "actual_sha256": "b3af11d71034819c1405b0952a8c248e510794a470b82aa40c6db4159147b1b7",
+    "matches": true
+  },
+  {
+    "file": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/sessions/session_week03_20261016_204000_market.jsonl",
+    "archive_input_present": false,
+    "local_present": true,
+    "expected_sha256": "b9b93c38a5f52b5a2a79b07cf4feda53560669202cc2bf9f67b11c60ffab8b1d",
+    "actual_sha256": "b9b93c38a5f52b5a2a79b07cf4feda53560669202cc2bf9f67b11c60ffab8b1d",
+    "matches": true
+  },
+  {
+    "file": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/sessions/session_week04_20261023_204025_market.jsonl",
+    "archive_input_present": false,
+    "local_present": true,
+    "expected_sha256": "8b90295e4a70c91e6fe9b04d1189ce46898c7a8f6afb0967b7886b7c236d2685",
+    "actual_sha256": "8b90295e4a70c91e6fe9b04d1189ce46898c7a8f6afb0967b7886b7c236d2685",
+    "matches": true
+  }
+]

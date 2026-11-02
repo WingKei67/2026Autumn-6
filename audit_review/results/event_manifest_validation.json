@@ -1,0 +1,25 @@
+{
+  "validation_actual_replays": [
+    {
+      "week": 5,
+      "seed": 3000,
+      "match": true
+    },
+    {
+      "week": 5,
+      "seed": 3001,
+      "match": true
+    },
+    {
+      "week": 9,
+      "seed": 3000,
+      "match": true
+    },
+    {
+      "week": 9,
+      "seed": 3001,
+      "match": true
+    }
+  ],
+  "method": "Chronological CalendarEvent.resolve draws under isolated seeded RNG; source inspection finds no other active global-RNG consumers. Validated against actual full no-trade simulations; audit analysis only, not signal input."
+}

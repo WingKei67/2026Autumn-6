@@ -271,7 +271,10 @@ class BrokerBot:
             elif isinstance(msg, Leaderboard):
                 self._on_leaderboard(msg)
             elif isinstance(msg, ErrorMsg):
-                logger.warning("Exchange error [%s]: %s", msg.code, msg.message)
+                self._on_error(msg)
+
+    def _on_error(self, msg: ErrorMsg) -> None:
+        logger.warning("Exchange error [%s]: %s", msg.code, msg.message)
 
     def _on_order_ack(self, msg: OrderAck) -> None:
         """Record the server-assigned order_id for our resting quote."""

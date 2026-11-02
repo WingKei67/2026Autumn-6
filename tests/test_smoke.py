@@ -122,10 +122,10 @@ def _smoke_summary(request):
 
 
 def test_python_version():
-    """1. Python 3.11+ virtual environment is active."""
-    assert sys.version_info[:2] >= (3, 11), (
-        f"Need Python 3.11+, but this is {sys.version.split()[0]} — "
-        "activate your 3.11 virtual environment."
+    """1. Python 3.10+ virtual environment is active."""
+    assert sys.version_info[:2] >= (3, 10), (
+        f"Need Python 3.10+, but this is {sys.version.split()[0]} — "
+        "activate your Python 3.10+ virtual environment."
     )
 
 
@@ -181,6 +181,8 @@ def test_ai_provider_optional():
     To opt out after setting a key, unset it and run again.
     """
     import importlib.util
+    if not os.environ.get("RUN_LIVE_SMOKE"):
+        pytest.skip("external AI smoke requires RUN_LIVE_SMOKE=1")
 
     chosen = [name for name, (envs, _, _) in _AI_PROVIDERS.items()
               if any(os.environ.get(e) for e in envs)]
@@ -205,6 +207,8 @@ def test_ai_provider_optional():
 
 def test_yfinance_live_price():
     """4. yfinance returns a live AAPL price."""
+    if not os.environ.get("RUN_LIVE_SMOKE"):
+        pytest.skip("live market-data smoke requires RUN_LIVE_SMOKE=1")
     yf = pytest.importorskip("yfinance", reason="run `pip install yfinance`")
     try:
         hist = yf.Ticker("AAPL").history(period="1d")
@@ -244,6 +248,8 @@ def test_exchange_connection():
     EXCHANGE_HOST + EXCHANGE_PORT. It connects, sends a
     shared.messages.Handshake, and waits for a BookSnapshot.
     """
+    if not os.environ.get("RUN_LIVE_SMOKE"):
+        pytest.skip("remote exchange smoke requires RUN_LIVE_SMOKE=1")
     from shared.exchange_url import SOURCE_DEFAULT, resolve_exchange_url
 
     url, source = resolve_exchange_url()

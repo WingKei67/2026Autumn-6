@@ -33,6 +33,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import arena  # bootstrap engine/ imports and local environment
+
 from rich.console import Console
 from rich.table import Table
 

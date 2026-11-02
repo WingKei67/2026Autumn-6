@@ -47,7 +47,7 @@ import exchange.config as config
 
 SEASON_DIR = os.environ.get(
     "SEASON_DIR",
-    str(pathlib.Path(__file__).parent.parent / "teacher" / "season"),
+    str(pathlib.Path(__file__).resolve().parents[2] / "season"),
 )
 
 # Every gate, with the value that reproduces pre-season behaviour.

@@ -1,0 +1,1600 @@
+diff --git a/audit_review/conftest.py b/audit_review/conftest.py
+new file mode 100644
+index 0000000..4680c31
+--- /dev/null
++++ b/audit_review/conftest.py
+@@ -0,0 +1,6 @@
++"""Keep extracted dependencies/baselines out of repository-wide pytest scans.
++
++Audit diagnostics are run explicitly in a separate process to avoid mixing
++original and extracted exchange modules in the same Python import cache.
++"""
++collect_ignore = ['extracted', 'code']
+diff --git a/audit_review/.gitignore b/audit_review/.gitignore
+new file mode 100644
+index 0000000..17d7dc6
+--- /dev/null
++++ b/audit_review/.gitignore
+@@ -0,0 +1,5 @@
++extracted/
++mpl_cache/
++**/__pycache__/
++results/*.jsonl
++results/*.log
+diff --git a/audit_review/FILES.md b/audit_review/FILES.md
+new file mode 100644
+index 0000000..99de68c
+--- /dev/null
++++ b/audit_review/FILES.md
+@@ -0,0 +1,59 @@
++# Audit deliverables
++
++- `REPORT.md`: executive verdict, complete metrics, evidence quality, severity-ranked findings, strategy attribution, charts and five-priority roadmap.
++- `issues.json`: machine-readable code audit with files, functions and lines.
++- `results/strategy_metrics.csv` / `.json`: fresh and stress metrics, including net/gross P&L, commissions/rebates/cancels, slippage, session Sharpe, drawdown, overlay FIFO profit factor/win rate, turnover, fills and observed risk failures.
++- `results/final_validation.json`: complete matrix sizes, frozen code fingerprints, observed safety diagnostics and offline connection guard check.
++- `results/reproduction_verification.json`: exact archive reproduction checks.
++- `results/paired_correction_effects.csv`: matched-seed effects of infrastructure fixes.
++- `results/historical_comparison.csv`: external-input historical replays and exact archived-result deltas.
++- `results/pairwise_comparisons.csv`: paired strategy differences and bootstrap intervals.
++- `results/event_manifest.csv`, `event_direction_conditions.csv`, `volatility_regimes.csv`, `regime_conditions.csv`: regime coverage and conditional results; these are descriptive, not causal attribution.
++- `results/*_protocol.json`, `effective_configuration.json`, `environment.json`, `source_verification.json`, `historical_inputs.json`: reproducibility and input provenance.
++- `results/archive_tests.xml`, `audit_tests.xml`: executed final test results.
++- `figures/`: equity, drawdown, cross-seed P&L distribution, cost decomposition, parameter sensitivity and stress charts.
++- `results/{reproduce,fresh,stress,paired_corrections}.jsonl`: full local equity paths and account-tagged fill ledgers; ignored by Git because of size.
++- `changes.patch`: review patch for audit source, report and findings; numerical outputs remain separate artifacts.
++
++## Corrected code and diagnostics
++
++- `code/audit_study.py`: corrected research gateway, per-account fill diagnostics, unchanged archived strategies, deterministic parallel studies.
++- `code/atomic_exchange.py`: separate buffered-settlement fixture fixing the demonstrated ACK suspension race. It is not a complete production venue replacement. The held-MOC defect remains unresolved.
++- `code/fifo.py`: per-account overlay FIFO, matching trading changes relative to endowed inventory.
++- `code/test_audit.py`, `test_exchange_concurrency.py`, `test_fifo.py`: 14 regressions/diagnostics. Some intentionally demonstrate bugs in the original venue; passing does not mean that venue is fixed.
++- `code/network_guard.py`: rejects non-loopback socket connections for study/test processes.
++- `code/build_report.py`: completeness checks, metrics, rankings and static figures.
++- `code/paired_corrections.py`, `reproduce_history.py`, `event_coverage.py`: additional matched comparisons, checksum-verified external tapes and event coverage validation.
++- `code/extract_archive.py`, `verify_sources.py`, `run_archive_tests.py`: archive setup and baseline verification.
++- `conftest.py`: excludes extracted copies and isolated audit diagnostics from repository-wide pytest recursion; diagnostics still run by explicit file path.
++- `code/run_root_tests.py`: guarded verification of default repository test collection.
++- `code/findings.py`: reviewed finding definitions used to build the report.
++
++The extracted archive is preserved under `extracted/2026Autumn-6-fresh/` and ignored by Git. The audit does not edit `.env`, credentials, live bots, root exchange code, or unrelated user changes. No hosted exchange orders are placed.
++
++## Run
++
++From the repository root, use Python 3.10. If the extraction is absent:
++
++```bash
++python3 audit_review/code/extract_archive.py --archive ../alpha_review_light.zip
++```
++
++Then:
++
++```bash
++python3 audit_review/code/verify_sources.py
++python3 audit_review/code/run_archive_tests.py
++python3 audit_review/code/run_root_tests.py
++python3 -m pytest audit_review/code/test_audit.py audit_review/code/test_exchange_concurrency.py audit_review/code/test_fifo.py -q
++python3 audit_review/code/audit_study.py --stage reproduce --workers 8
++python3 audit_review/code/audit_study.py --stage fresh --workers 8
++python3 audit_review/code/audit_study.py --stage stress --workers 8
++python3 audit_review/code/paired_corrections.py
++python3 audit_review/code/reproduce_history.py
++python3 audit_review/code/event_coverage.py
++python3 audit_review/code/validate_outputs.py
++.venv310/bin/python audit_review/code/build_report.py
++```
++
++Historical replay requires the three external `sessions/` recordings listed in `results/historical_inputs.json`; they are not included in the ZIP. The report uses the existing `.venv310` installation of NumPy/Matplotlib. Study commands overwrite only their own audit output files; preserve these files before changing experiment definitions. The final report builder refuses incomplete matrices.
+diff --git a/audit_review/REPORT.md b/audit_review/REPORT.md
+new file mode 100644
+index 0000000..c644a85
+--- /dev/null
++++ b/audit_review/REPORT.md
+@@ -0,0 +1,403 @@
++# Independent AlgoArena quantitative audit
++
++## Executive verdict
++
++By mean incremental net P&L across eligible weeks, the best new single strategy is **market_making** and the weakest is **basket**. Among the two active single-strategy finalists, **event_momentum** has the strongest minimum lower confidence bound across tested base/cost/execution regimes (24.24 dollars). This conservative descriptive ranking is conditional on the generator and is not an adjusted multi-test confidence statement. The A+C portfolio is the strongest new combined candidate by base mean P&L; the original dominates absolute Week 5 simulated returns, with different sizing and information.
++
++The primary ranking below is the newly executed, frozen-parameter evaluation on seeds 3000–3049, using the corrected research gateway. Positive synthetic performance is evidence about this specified generator, not convincing real-market alpha. Historical event momentum is negative relative to no-trade on all three available recordings. Do not promote these alphas to the proven live bot on this evidence.
++
++The original Week 5 strategy must be judged separately: it trades larger risk and uses public calendar shock-shape information. In Week 9 it is explicitly disabled. The best new strategy and combined portfolio are identified by after-fee excess below; no-trade is the proper endowed-inventory comparator.
++
++## Executed evidence and reproducibility
++
++```json
++{
++  "reproduced_runs": 900,
++  "matched_primary_runs": 800,
++  "max_absolute_pnl_difference": 0.0,
++  "fill_count_mismatches": 0,
++  "historical_runs": 15,
++  "historical_max_pnl_difference": 0.0,
++  "paired_correction_runs": 500
++}
++```
++
++Archive SHA256: `1fe1d222c67447ace8f14ba5bcc2a9a8e1ce91e3b0303a5d344ba84f23f7cf76`. Extracted code is preserved unchanged under `extracted/2026Autumn-6-fresh`. All new code, output and fixes live under `audit_review/`; `.env` and live bot code were not edited by this audit.
++
++Archive tests: **317 passed, 3 skipped**, 320 collected, 0 failures/errors (see XML). The root repository suite also passed **317 tests with 3 skips**, with extracted copies excluded from default discovery. Audit regressions: **14 passed**. The first sandboxed root run had two localhost-binding permission failures; the permitted rerun passed with the non-loopback guard still active. Network guard blocks non-loopback socket connections; only isolated local mechanics are used. The tests that require live smoke execution remain skipped. Diagnostic regressions intentionally reproduce two unsafe original-exchange outcomes; a passing diagnostic is evidence that the bug exists, not that the original venue was repaired. The corrected fixture is tested separately against the ACK settlement interleaving.
++
++Executed synthetic trials in this audit: reproduction 900, fresh corrected 900, corrected stress 2000, paired correction diagnostics 500. Each complete comparison uses 50 identical exogenous seeds per strategy/week; price paths can respond to the candidate’s actual order impact, so realized prices are not artificially forced identical; weeks are different scenarios using the same seed IDs, not 100 independent seeds. Seeds 1000–1049 are reproduction only; new seeds 3000–3049 were fixed before inspecting outcomes. No parameter retuning on them.
++
++The ZIP omits all three historical recordings. Local external copies match the archived SHA256 inventory exactly; 15 funded historical replays are reproduced separately. This is not a self-contained archive and these previously inspected days are not pristine held-out data. There is no Week 5 historical tape. Synthetic experiments never silently stand in for historical backtests.
++
++Supplied files document 624 calibration, 800 primary OOS, 550 ablation, 2400 stress, 500 secondary confirmation and 900 secondary stress runs: 5774 seeded trials, 112 distinct seed IDs (12 calibration + 50 primary + 50 confirmation). Fee-audit replays, illustrative curves and historical replays are not additional independent seeds. Saved outputs show execution, but only the explicitly reproduced subsets are independently verified here.
++
++## Fresh out-of-sample ranking
++
++| week | strategy | seeds | net_pnl | excess_no_trade | excess_ci_low | excess_ci_high | gross_pnl | mean_net_transaction_costs | mean_fills |
++| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
++| 5 | original | 50 | 2,140.85 | 1,596.51 | 1,307.61 | 1,904.39 | 2,583.76 | 442.91 | 29.74 |
++| 5 | combined_profit | 50 | 859.19 | 314.84 | 248.98 | 380.34 | 756.10 | -103.09 | 329.66 |
++| 5 | market_making | 50 | 742.46 | 198.12 | 101.07 | 292.81 | 594.74 | -147.72 | 304.28 |
++| 5 | event_momentum | 50 | 728.67 | 184.33 | 155.91 | 213.03 | 810.85 | 82.17 | 10.86 |
++| 5 | combined | 50 | 688.72 | 144.38 | 116.84 | 173.34 | 759.24 | 70.52 | 12.14 |
++| 5 | basket | 50 | 544.34 | 0.00 | 0.00 | 0.00 | 544.34 | 0.00 | 0 |
++| 5 | no_trade | 50 | 544.34 | 0.00 | 0.00 | 0.00 | 544.34 | 0.00 | 0 |
++| 5 | post_halt | 50 | 540.04 | -4.30 | -7.57 | -1.48 | 546.88 | 6.84 | 1.30 |
++| 5 | buy_hold | 50 | 292.68 | -251.67 | -735.49 | 275.23 | 426.58 | 133.90 | 10.42 |
++| 9 | combined_profit | 50 | 835.33 | 306.05 | 228.51 | 381.63 | 707.86 | -127.46 | 381.62 |
++| 9 | market_making | 50 | 739.40 | 210.12 | 115.64 | 303.27 | 579.69 | -159.71 | 353.82 |
++| 9 | event_momentum | 50 | 663.49 | 134.21 | 112.33 | 154.99 | 728.20 | 64.71 | 11.08 |
++| 9 | combined | 50 | 638.25 | 108.97 | 86.02 | 131.66 | 694.18 | 55.93 | 12.04 |
++| 9 | no_trade | 50 | 529.28 | 0.00 | 0.00 | 0.00 | 529.28 | 0.00 | 0 |
++| 9 | original | 50 | 529.28 | 0.00 | 0.00 | 0.00 | 529.28 | 0.00 | 0 |
++| 9 | post_halt | 50 | 528.75 | -0.53 | -2.32 | 1.11 | 532.16 | 3.41 | 0.92 |
++| 9 | basket | 50 | 521.59 | -7.69 | -11.57 | -4.64 | 523.62 | 2.03 | 1.74 |
++| 9 | buy_hold | 50 | 217.76 | -311.52 | -838.77 | 221.60 | 351.66 | 133.90 | 10.48 |
++
++All dollars are mean per 1500-tick trial, not projected live-session dollars. Starting cash is a controlled $175,000 TOTAL per experiment, taken from configured trader 1, plus the exchange grant; the live configuration is $175,000/$175,000/$350,000 for trader 1/trader 2/broker. Thus this is not a $700,000 three-seat live-account replay, and the combined experiment splits a common $175,000 budget rather than duplicating live account allocations; all fees come from actual portfolio accounting. The study deliberately charges taker 30 bps (the earlier requested research setting), with maker rebate 10 bps where eligible. The repository’s bare default taker setting is 15 bps and can be overridden by venue/environment configuration; no claim is made that 30 bps is the universal hosted default. Week 9 cancellation fees included. Gross = net MTM P&L + actual net execution fees; carry is still deducted. This is an accounting decomposition, not a zero-fee counterfactual. Slippage vs decision mid is already inside P&L and is not subtracted twice.
++
++Pairwise differences use the same seeds; do not infer superiority merely from overlapping or non-overlapping marginal intervals.
++
++| week | left | right | seeds | mean_difference | ci_low | ci_high |
++| --- | --- | --- | --- | --- | --- | --- |
++| 5 | market_making | event_momentum | 50 | 13.79 | -90.21 | 118.08 |
++| 5 | combined_profit | event_momentum | 50 | 130.52 | 59.28 | 198.23 |
++| 5 | original | event_momentum | 50 | 1,412.18 | 1,121.21 | 1,720.36 |
++| 9 | market_making | event_momentum | 50 | 75.91 | -28.33 | 178.14 |
++| 9 | combined_profit | event_momentum | 50 | 171.84 | 88.24 | 253.58 |
++| 9 | original | event_momentum | 50 | -134.21 | -155.91 | -113.18 |
++
++## Risk and trading statistics
++
++| week | strategy | session_sharpe | worst_drawdown_pct | profit_factor | closed_fill_win_rate_pct | mean_turnover | mean_fills | liquidations | position_violations | team_violations |
++| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
++| 5 | original | 1.47 | 0.95 | 13.14 | 79.10 | 0.77 | 29.74 | 0 | 0 | 0 |
++| 5 | combined_profit | 1.96 | 0.74 | 2.88 | 85.98 | 0.98 | 329.66 | 0 | 0 | 0 |
++| 5 | market_making | 1.79 | 1.01 | 1.89 | 80.90 | 0.87 | 304.28 | 0 | 0 | 0 |
++| 5 | event_momentum | 1.80 | 0.48 | 13.46 | 84.03 | 0.14 | 10.86 | 0 | 0 | 0 |
++| 5 | combined | 1.66 | 0.53 | 10.34 | 77.70 | 0.12 | 12.14 | 0 | 0 | 0 |
++| 5 | basket | 1.80 | 0.57 | N/A | N/A | 0.00 | 0 | 0 | 0 | 0 |
++| 5 | no_trade | 1.80 | 0.57 | N/A | N/A | 0.00 | 0 | 0 | 0 | 0 |
++| 5 | post_halt | 1.79 | 0.57 | 0.27 | 28.12 | 0.01 | 1.30 | 0 | 0 | 0 |
++| 5 | buy_hold | 0.26 | 2.51 | N/A | N/A | 0.23 | 10.42 | 0 | 0 | 0 |
++| 9 | combined_profit | 2.11 | 0.55 | 2.99 | 85.79 | 1.29 | 381.62 | 0 | 0 | 0 |
++| 9 | market_making | 2.22 | 0.65 | 1.94 | 80.29 | 1.17 | 353.82 | 0 | 0 | 0 |
++| 9 | event_momentum | 1.67 | 0.40 | 331.17 | 95.97 | 0.11 | 11.08 | 0 | 0 | 0 |
++| 9 | combined | 1.54 | 0.45 | 52.24 | 90.30 | 0.10 | 12.04 | 0 | 0 | 0 |
++| 9 | no_trade | 2.04 | 0.49 | N/A | N/A | 0.00 | 0 | 0 | 0 | 0 |
++| 9 | original | 2.04 | 0.49 | N/A | N/A | 0.00 | 0 | 0 | 0 | 0 |
++| 9 | post_halt | 2.04 | 0.49 | 0.76 | 29.17 | 0.01 | 0.92 | 0 | 0 | 0 |
++| 9 | basket | 2.01 | 0.49 | 0.00 | 0.00 | 0.00 | 1.74 | 0 | 0 | 0 |
++| 9 | buy_hold | 0.11 | 2.08 | N/A | N/A | 0.23 | 10.48 | 0 | 0 | 0 |
++
++Sharpe is session-scaled tick-return Sharpe, not annualized or an iid significance test. Profit factor pools positive/negative FIFO closing-fill P&L across independently matched accounts, including entry/exit fill commissions and rebates, and adds period cancellation/carry expenses to the loss denominator. This is an expense-adjusted closed-fill diagnostic, not a round-trip PF; the unallocated closed-fill PF is also exported. Non-fill expenses are not assigned arbitrarily to individual lots. The report uses overlay FIFO initialized at zero change from starting inventory: selling endowed shares opens a virtual short overlay, and buying them back closes it. This does not submit an actual stock short. It avoids assigning an arbitrary initial reference price to granted shares. Raw journals also preserve the earlier endowment-inclusive FIFO diagnostic, which is not used for this report’s profit factor. N/A means no losses or no closed fills, never an infinite profit claim. “Trades” here means fill messages; partial fills count separately. The exchange values the full position at the best bid/ask without a depth sweep, and own quotes can affect those marks. These are venue MTM results, not guaranteed exit cash. Net MTM includes open holdings; profit factor on closed fills cannot explain all MTM gains. Full fields, costs, slippage, closed counts and provenance counters are in `results/strategy_metrics.csv`.
++
++No-trade earns/loses on granted inventory, so a positive net account P&L alone is not alpha. Buy-and-hold invests 30% across four active equities, capped at 150 shares each; it is not a fully invested broad-market benchmark. Combined sleeves share total starting cash and conservative independent caps; it is a coordinated-capital experiment, not an atomic hedge execution service.
++
++## Paired effect of correctness fixes
++
++| week | strategy | seeds | mean_pnl_change | min_pnl_change | max_pnl_change | ci_low | ci_high | mean_fill_change |
++| --- | --- | --- | --- | --- | --- | --- | --- | --- |
++| 5 | basket | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 5 | event_momentum | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 5 | market_making | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 5 | no_trade | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 5 | post_halt | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 9 | basket | 50 | 0.01 | -0.00 | 0.30 | -0.00 | 0.02 | 0 |
++| 9 | event_momentum | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 9 | market_making | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 9 | no_trade | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 9 | post_halt | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++
++These differences compare corrected and original gateways on the SAME previously viewed seeds 1000–1049. They measure implementation effects, not new OOS alpha or a newly optimized strategy. A/B/C have exactly unchanged P&L on all 50 paired seeds; only basket changes, by about $0.006 per Week 9 run on average. Therefore the measured A/C gains should not be blamed on the gateway arrival check: their main external-validity concerns are population/fees/exposure. Fixes are retained for defensible order/risk semantics even where mean returns do not improve. The separate buffered-settlement fixture is not mixed into these serialized results.
++
++## Stress results
++
++| week | strategy | regime | seeds | excess_no_trade | excess_ci_low | excess_ci_high | mean_net_transaction_costs | liquidations |
++| --- | --- | --- | --- | --- | --- | --- | --- | --- |
++| 5 | combined_profit | fast_quotes | 50 | 245.52 | 174.83 | 313.30 | -102.70 | 0 |
++| 5 | combined_profit | fees_60bps | 50 | 246.54 | 181.43 | 307.63 | -39.14 | 0 |
++| 5 | combined_profit | latency_3ticks | 50 | 212.74 | 142.44 | 284.78 | -143.13 | 0 |
++| 5 | combined_profit | no_rebate | 50 | 146.79 | 81.44 | 208.61 | 64.69 | 0 |
++| 5 | event_momentum | fast_quotes | 50 | 151.42 | 132.03 | 169.24 | 81.17 | 0 |
++| 5 | event_momentum | fees_60bps | 50 | 88.94 | 58.52 | 119.10 | 163.77 | 0 |
++| 5 | event_momentum | latency_3ticks | 50 | 37.89 | 24.24 | 52.39 | 29.82 | 0 |
++| 5 | event_momentum | no_rebate | 50 | 184.33 | 154.30 | 213.85 | 82.17 | 0 |
++| 5 | market_making | fast_quotes | 50 | 148.54 | 66.08 | 227.31 | -151.72 | 0 |
++| 5 | market_making | fees_60bps | 50 | 183.30 | 84.33 | 277.72 | -132.91 | 0 |
++| 5 | market_making | latency_3ticks | 50 | 158.39 | 44.68 | 269.10 | -154.92 | 0 |
++| 5 | market_making | no_rebate | 50 | 35.31 | -60.84 | 126.14 | 14.82 | 0 |
++| 5 | no_trade | fast_quotes | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 5 | no_trade | fees_60bps | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 5 | no_trade | latency_3ticks | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 5 | no_trade | no_rebate | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 5 | original | fast_quotes | 50 | 1,236.84 | 1,007.06 | 1,470.89 | 397.13 | 0 |
++| 5 | original | fees_60bps | 50 | 1,249.96 | 989.43 | 1,531.20 | 743.92 | 0 |
++| 5 | original | latency_3ticks | 50 | 813.84 | 622.71 | 1,022.34 | 258.62 | 0 |
++| 5 | original | no_rebate | 50 | 1,596.51 | 1,295.56 | 1,906.18 | 442.91 | 0 |
++| 9 | combined_profit | fast_quotes | 50 | 248.25 | 180.14 | 322.04 | -121.97 | 0 |
++| 9 | combined_profit | fees_60bps | 50 | 245.08 | 168.40 | 319.40 | -80.51 | 0 |
++| 9 | combined_profit | latency_3ticks | 50 | 209.31 | 143.73 | 273.46 | -155.54 | 0 |
++| 9 | combined_profit | no_rebate | 50 | 76.17 | 15.66 | 136.41 | 102.08 | 0 |
++| 9 | event_momentum | fast_quotes | 50 | 115.55 | 95.55 | 135.62 | 65.24 | 0 |
++| 9 | event_momentum | fees_60bps | 50 | 52.97 | 31.44 | 75.79 | 121.50 | 0 |
++| 9 | event_momentum | latency_3ticks | 50 | 44.13 | 29.76 | 59.75 | 35.06 | 0 |
++| 9 | event_momentum | no_rebate | 50 | 134.21 | 113.34 | 155.25 | 64.71 | 0 |
++| 9 | market_making | fast_quotes | 50 | 142.66 | 58.11 | 234.32 | -159.44 | 0 |
++| 9 | market_making | fees_60bps | 50 | 196.17 | 100.18 | 292.70 | -145.76 | 0 |
++| 9 | market_making | latency_3ticks | 50 | 155.01 | 77.73 | 231.45 | -167.56 | 0 |
++| 9 | market_making | no_rebate | 50 | -11.54 | -89.15 | 66.13 | 61.62 | 0 |
++| 9 | no_trade | fast_quotes | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 9 | no_trade | fees_60bps | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 9 | no_trade | latency_3ticks | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 9 | no_trade | no_rebate | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 9 | original | fast_quotes | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 9 | original | fees_60bps | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 9 | original | latency_3ticks | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++| 9 | original | no_rebate | 50 | 0.00 | 0.00 | 0.00 | 0.00 | 0 |
++
++Fees_60bps doubles taker costs while leaving the real maker schedule unchanged. Latency_3ticks freezes requests for three ticks. Fast_quotes refreshes the synthetic provider each tick, exposing dependence on stale counterparty quotes. No_rebate explicitly removes maker rebates and reports this as a counterfactual, not the venue default. All retain actual matching/risk/order quotas. Spread/depth/TTL/informedness remain confounded in the base generator; `regime_conditions.csv` is descriptive, not a causal spread estimate. Fresh stress seeds are the same 50 IDs for paired comparison, not additional independent days.
++
++## Event regime coverage
++
++| week | event_tick | symbol | direction | seeds | strategy | mean_excess |
++| --- | --- | --- | --- | --- | --- | --- |
++| 5 | 300 | NFLX | up | 26 | event_momentum | 199.71 |
++| 5 | 300 | NFLX | up | 26 | market_making | 390.48 |
++| 5 | 300 | NFLX | up | 26 | combined_profit | 408.65 |
++| 5 | 300 | NFLX | down | 24 | event_momentum | 167.67 |
++| 5 | 300 | NFLX | down | 24 | market_making | -10.27 |
++| 5 | 300 | NFLX | down | 24 | combined_profit | 213.22 |
++| 5 | 750 | AMD | up | 24 | event_momentum | 191.09 |
++| 5 | 750 | AMD | up | 24 | market_making | 264.38 |
++| 5 | 750 | AMD | up | 24 | combined_profit | 315.57 |
++| 5 | 750 | AMD | down | 26 | event_momentum | 178.08 |
++| 5 | 750 | AMD | down | 26 | market_making | 136.95 |
++| 5 | 750 | AMD | down | 26 | combined_profit | 314.17 |
++| 5 | 1050 | * | up | 26 | event_momentum | 220.66 |
++| 5 | 1050 | * | up | 26 | market_making | 302.55 |
++| 5 | 1050 | * | up | 26 | combined_profit | 399.38 |
++| 5 | 1050 | * | down | 24 | event_momentum | 144.97 |
++| 5 | 1050 | * | down | 24 | market_making | 84.98 |
++| 5 | 1050 | * | down | 24 | combined_profit | 223.26 |
++| 9 | 350 | * | up | 26 | event_momentum | 161.03 |
++| 9 | 350 | * | up | 26 | market_making | 332.71 |
++| 9 | 350 | * | up | 26 | combined_profit | 388.06 |
++| 9 | 350 | * | down | 24 | event_momentum | 105.15 |
++| 9 | 350 | * | down | 24 | market_making | 77.31 |
++| 9 | 350 | * | down | 24 | combined_profit | 217.20 |
++| 9 | 700 | NVDA | up | 24 | event_momentum | 162.58 |
++| 9 | 700 | NVDA | up | 24 | market_making | 277.32 |
++| 9 | 700 | NVDA | up | 24 | combined_profit | 362.20 |
++| 9 | 700 | NVDA | down | 26 | event_momentum | 108.02 |
++| 9 | 700 | NVDA | down | 26 | market_making | 148.08 |
++| 9 | 700 | NVDA | down | 26 | combined_profit | 254.22 |
++
++Direction groups condition total trial P&L on one event sign; they do not isolate that event’s causal contribution because each trial contains other shocks. `event_manifest.csv` reconstructs deterministic resolved events from the isolated calendar RNG, validated against four full actual no-trade replays. Resolved directions are used only for this post-run audit and are never passed into the alpha strategies. There are 250 price events across the 50 fresh seeds and two scenarios.
++
++## Supplied volatility stress (not independently rerun)
++
++| week | strategy | seeds | mean_excess | ci_low | ci_high | net_fees |
++| --- | --- | --- | --- | --- | --- | --- |
++| 5 | original | 50 | 1,719.58 | 1,376.51 | 2,079.02 | 287.37 |
++| 5 | market_making | 50 | 162.78 | 25.09 | 297.98 | -111.53 |
++| 5 | event_momentum | 50 | 114.31 | 88.88 | 141.22 | 42.62 |
++| 5 | combined | 50 | 90.73 | 66.77 | 117.25 | 36.67 |
++| 5 | basket | 50 | 0.00 | 0.00 | 0.00 | 0.00 |
++| 5 | no_trade | 50 | 0.00 | 0.00 | 0.00 | 0.00 |
++| 5 | post_halt | 50 | -0.49 | -1.29 | 0.28 | 1.72 |
++| 5 | buy_hold | 50 | -232.94 | -941.94 | 471.81 | 134.01 |
++| 9 | market_making | 50 | 156.59 | 28.27 | 284.47 | -133.12 |
++| 9 | event_momentum | 50 | 140.78 | 114.19 | 168.39 | 62.38 |
++| 9 | combined | 50 | 116.67 | 90.03 | 143.96 | 54.93 |
++| 9 | no_trade | 50 | 0.00 | 0.00 | 0.00 | 0.00 |
++| 9 | original | 50 | 0.00 | 0.00 | 0.00 | 0.00 |
++| 9 | post_halt | 50 | -0.46 | -3.27 | 3.14 | 3.16 |
++| 9 | basket | 50 | -27.98 | -40.50 | -17.42 | 5.41 |
++| 9 | buy_hold | 50 | -290.17 | -948.64 | 356.51 | 134.01 |
++
++This archived stress doubles the seed-specific volatility multiplier and magnifies scheduled shocks by 1.5. It is additional supplied evidence, not part of the new frozen 50-seed rerun. Fresh base regimes already span volatility multipliers 0.5, 1, 2 and 4; their conditional outcomes are exported in `volatility_regimes.csv`.
++
++## Historical evidence
++
++| file | strategy | net_pnl | excess_no_trade | commissions | slippage | fills | pnl_reproduction_delta |
++| --- | --- | --- | --- | --- | --- | --- | --- |
++| session_week02_20261009_204000.jsonl.gz | basket | 1,057.47 | 0.00 | 0 | 0 | 0 | 0.00 |
++| session_week02_20261009_204000.jsonl.gz | post_halt | 1,057.47 | 0.00 | 0 | 0 | 0 | 0.00 |
++| session_week02_20261009_204000.jsonl.gz | event_momentum | 907.37 | -150.10 | 75.23 | 23.74 | 95 | 0.00 |
++| session_week03_20261016_204000_market.jsonl | event_momentum | 734.97 | -43.01 | 12.54 | -0.70 | 21 | 0.00 |
++| session_week02_20261009_204000.jsonl.gz | no_trade | 1,057.47 | 0.00 | 0 | 0 | 0 | 0.00 |
++| session_week02_20261009_204000.jsonl.gz | buy_hold | 2,034.19 | 976.71 | 116.65 | 22.80 | 317 | 0.00 |
++| session_week03_20261016_204000_market.jsonl | post_halt | 777.98 | 0.00 | 0 | 0 | 0 | 0.00 |
++| session_week03_20261016_204000_market.jsonl | basket | 777.98 | 0.00 | 0 | 0 | 0 | 0.00 |
++| session_week03_20261016_204000_market.jsonl | buy_hold | -673.55 | -1,451.53 | 107.93 | 11.27 | 300 | 0.00 |
++| session_week04_20261023_204025_market.jsonl | post_halt | 400.85 | 0.00 | 0 | 0 | 0 | 0.00 |
++| session_week04_20261023_204025_market.jsonl | event_momentum | 171.01 | -229.84 | 73.52 | 52.98 | 82 | 0.00 |
++| session_week03_20261016_204000_market.jsonl | no_trade | 777.98 | 0.00 | 0 | 0 | 0 | 0.00 |
++| session_week04_20261023_204025_market.jsonl | basket | 400.85 | 0.00 | 0 | 0 | 0 | 0.00 |
++| session_week04_20261023_204025_market.jsonl | buy_hold | 469.80 | 68.95 | 98.28 | 10.00 | 226 | 0.00 |
++| session_week04_20261023_204025_market.jsonl | no_trade | 400.85 | 0.00 | 0 | 0 | 0 | 0.00 |
++
++Replay uses real exchange order handling against reconstructed recorded ladders with funded providers, depth capped at 60 per level and 200 initial stock shares/provider. Historical recordings do not reveal queue identities, future order cancellations, latency or the counterfactual impact of our bot. Therefore market making is deliberately not scored on these tapes. Post-halt and basket inactivity is not successful alpha; futures were unavailable and usable halt/reversal opportunities absent. All three event-momentum days underperform no-trade, even after adding commissions back, so simply reducing fees does not establish historical profitability.
++
++## Supplied strategy ablations (not independently rerun)
++
++| week | variant | seeds | excess_no_trade | net_fees | fills |
++| --- | --- | --- | --- | --- | --- |
++| 5 | event_momentum:ablation:no_fee_gate | 50 | 211.63 | 79.81 | 10.76 |
++| 5 | event_momentum:ablation:no_trailing | 50 | 204.86 | 79.79 | 10.76 |
++| 5 | market_making:ablation:no_adverse_filter | 50 | 140.02 | -171.10 | 355.94 |
++| 5 | market_making:ablation:no_microprice | 50 | 123.79 | -142.16 | 300.78 |
++| 5 | market_making:ablation:no_inventory_skew | 50 | 110.24 | -135.62 | 297.76 |
++| 5 | no_trade | 50 | 0.00 | 0.00 | 0.00 |
++| 5 | post_halt:ablation:no_earnings_filter | 50 | -2.14 | 3.30 | 0.82 |
++| 5 | post_halt:ablation:no_reversal | 50 | -35.94 | 28.19 | 6.14 |
++| 9 | no_trade | 50 | 0.00 | 0.00 | 0.00 |
++| 9 | basket:ablation:fixed_beta | 50 | -2.81 | 0.86 | 0.80 |
++| 9 | basket:ablation:unhedged | 50 | -4.66 | 0.91 | 0.76 |
++
++Removing the fee gate changes Week 5 excess by only about $1, and removing trailing costs about $5 on the supplied seeds. Those small deltas do not validate an optimal exit rule. Removing reversal confirmation worsens B from about -$2 to -$36 while increasing fills: extra activity is not extra alpha. Microprice and inventory-skew deltas are small relative to seed dispersion; no independent significance claim is made. Removing the adverse filter increases rebates/turnover, so its higher raw P&L cannot be read as better information prediction.
++
++## Code audit: severity and exact functions
++
++20 findings: 8 High, 11 Medium, 1 Low. These include demonstrated original-venue defects, measurement limitations and external-validity concerns; they are not all claims of realized P&L distortion.
++### High: `engine/exchange/server.py:1146` — `ExchangeServer._handle_place_order / close_session`
++
++Held MOC orders are absent from book.open_quantity risk reservations; close_session injects them directly into the closing book without a new admission check. Verified Week 9 case: three individually valid 500-share MOC buys produce 1500 shares under a 1000-share team cap. Unfixed in original and buffered-settlement fixture; no audited alpha uses MOC and performance runs do not close the session. Must reserve held MOC exposure/cash and revalidate auction eligibility before using this order type.
++
++### High: `engine/exchange/server.py:1226` — `ExchangeServer._handle_place_order`
++
++Matching removes liquidity before awaited ACK delivery, while portfolio settlement follows ACK. Concurrent seats can both validate against old team positions. Actual-handler regression produces 1000 shares from two 500-share buys under the Week 5 800-share team cap. Serialized backtests cannot reveal this race. Separate BufferedSettlementExchange serializes order mutation and buffers outbound delivery until settlement completes; regression rejects the second order. Full production tick/auction/transport coordination remains outside this fixture.
++
++### High: `alpha_lab/risk.py:45` — `Gateway.allowed_quantity`
++
++A reducing flag depends only on initial sign; futures orders can cross flat and bypass the equity, cash and gross entry tests. Regression: short 1, buy 21 with zero cash allowed. CorrectedGateway clips reducing requests to flat; dedicated regression.
++
++### High: `alpha_lab/risk.py:103` — `Gateway.execute_due`
++
++Rechecks server prices/cash/halt after transport delay and silently changes or discards the already-submitted payload. This is arrival-time privileged control, not ordinary exchange rejection. CorrectedGateway freezes non-contingent order payload; actual exchange decides arrival acceptance.
++
++### High: `alpha_lab/risk.py:119` — `Gateway.execute_due`
++
++Cumulative group fills are reused across exit retries; minimum hedge of 1 can overhedge fractional first-leg fills. Failure of second-leg admission can leave an unhedged first leg. Fresh attempt IDs and round-to-zero implemented. Atomicity and bounded unwind remain unresolved.
++
++### High: `alpha_lab/runner.py:105` — `MarketPopulation.refresh / flow`
++
++Synthetic liquidity anchors to the venue reference, with fixed TTL/depth and exogenous buy flow insensitive to actual fees. Our due orders always precede external flow. Matching is real but profitable counterparties are artificial. Fast quote refresh and no rebate stress tested separately; historical queue claims remain unsupported.
++
++### High: `alpha_lab/runner.py:232` — `run_one`
++
++Last 12 ticks replace strategies, including the original, with an imposed unwind, while buy-and-hold is left marked. No actual closing auction. Exit/terminal costs are not identical between baselines. Preserved for reproducibility; disclose results as MTM under this terminal convention.
++
++### High: `alpha_lab/baselines.py:45` — `Original.observe_async`
++
++Week gate explicitly disables original in Week 9. It cannot be presented as an active Week 9 baseline. Original also uses different position sizing and public event shape data. Label inactive Week 9 and avoid equal-risk/feature claims.
++
++### Medium: `alpha_lab/baselines.py:39` — `Original.observe_async`
++
++The original strategy and outbound risk method execute, but the adapter gives direct portfolio snapshots each tick, clears inflight when gateway pending is empty, and does not feed regular leaderboards that advance _venue_tick. Its live wire/clock/recovery behavior is not reproduced. Preserve this adapter for exact reproduction and label it an adapted original-policy baseline, not an end-to-end production-bot backtest. Correct clocks/ACK delivery and matched terminal rules before an equal-risk strategy comparison.
++
++### Medium: `engine/exchange/server.py:284` — `Portfolio.net_worth / ExchangeServer._bidask_marks`
++
++The venue marks an entire long/short inventory at best bid/ask without sweeping available depth; a tiny own quote can influence valuation. Positive MTM is not necessarily realizable liquidation P&L, especially with halted residual inventory. This matches venue accounting, not an implementation fee error. Report MTM explicitly, preserve open-overlay diagnostics and require depth-aware terminal liquidation/cash realization in a future matched-terminal study.
++
++### Medium: `alpha_lab/metrics.py:7` — `summarize`
++
++Execution net_fees excludes cancellation fees; unadjusted exports understate costs in Week 9. Archived fee_audit later repairs saved total_net_fees, so distinguish raw function from amended reports. Independent metrics read actual portfolio fees less rebates, include cancellation debits.
++
++### Medium: `alpha_lab/metrics.py:22` — `summarize`
++
++FIFO combines all sleeves before matching, allowing trades in different accounts to close each other. Win rate has no profit factor and omits cancellation/carry expense. Independent per-account overlay FIFO avoids cross-seat closes and arbitrary grant reference basis. The report also expenses period cancellation/carry in the profit-factor loss denominator; costs remain separately visible.
++
++### Medium: `alpha_lab/metrics.py:45` — `summarize`
++
++max_gross is maximum sleeve exposure rather than simultaneous portfolio total. Per-tick boundary safety counters do not establish every-fill safety. Retain field as sleeve maximum; aggregate exposure measurement remains an explicit limitation.
++
++### Medium: `alpha_lab/metrics.py:51` — `summarize`
++
++Same-tick counter excludes fills missing decision provenance. Zero is not evidence that every fill had valid provenance. Independent missing_fill_provenance counter exported.
++
++### Medium: `team/alpha/core.py:145` — `PositionStrategy.manage`
++
++Stops and holding duration initialize from first observed inventory change and observed midpoint, not actual weighted execution prices/times. Delayed/partial fills change realized stop risk. Needs fill-aware plan state before live deployment; not silently changed during frozen test.
++
++### Medium: `team/alpha/basket.py:36` — `Basket.decide`
++
++Beta is constrained positive without stationarity checks; log price residual z-score need not be mean reverting. Cost gate omits actual futures spread and integer hedge error. Keep experimental; no profitable claim. Disable until net edge and hedge repairs demonstrated.
++
++### Medium: `team/alpha/market_making.py:32` — `AdaptiveMarketMaker.decide`
++
++Inventory skew targets half cap, so long exposure and spread/rebate earnings are mixed. Adverse-selection filter is a volatility/trend proxy, not a conditional fill-markout estimate. Compare with no-trade and rebate-off stress; true neutral sizing requires borrow/short policy changes.
++
++### Medium: `alpha_lab/runner.py:108` — `MarketPopulation.__init__`
++
++Spread, depth, TTL and informedness all depend on seed modulo 3, so their marginal effects are confounded. Seed replication alone cannot identify spread sensitivity. Separate TTL intervention provided; independent factorial regime randomization remains future work.
++
++### Medium: `alpha_lab/experiment.py:87` — `select / run_batch`
++
++Only 12 calibration seeds across 50 settings and many comparisons; bootstrap intervals condition on generator and ignore selection/multiple testing. Previously viewed OOS seeds cannot be reused as fresh evidence. Frozen parameters tested on seeds 3000-3049; no new optimization or positive live-alpha conclusion.
++
++### Low: `alpha_lab/metrics.py:15` — `summarize`
++
++Session Sharpe scales by sqrt(number of ticks); it is not annualized and serial returns make standard iid inference unreliable. Fill win rate is not round-trip trade win rate. Explicit metric labels and paired seed-level inference in audit report.
++
++## Signal-to-accounting trace and verified mechanics
++
++Strategies observe public events and current visible book, decide, then append the current quote to lagged history. Momentum uses post-event observed prices; halt references are captured from strictly lagged pre-halt history; basket regression uses past returns. No direct future price-array access was found. The current book is observed at tick t; non-contingent orders arrive no earlier than t+1, so they do not fill on their signal-generating observation by construction. Equity strategies are long-only, making negative signals reductions of endowed inventory rather than symmetric stock-short alpha. The original strategy’s calendar percentage describes a future ramp, but it is deliberately public in this simulator; this is simulator-specific privileged predictability, not an undisclosed historical future-price lookup.
++
++Gateway reserves pending exposure before scheduling. The corrected non-contingent payload stays fixed during transport. The actual exchange handler validates and matches price-time priority at resting prices, emits ACK then fills, processes partial fills, IOC expiry and post-only rejection. Cancellation uses actual matching-engine state in this serialized adapter; it does not simulate asynchronous live cancellation uncertainty. Portfolio cash, positions, commissions, rebates, cancellation fees, carry and futures variation margin come from exchange objects. Snapshot/ACK delivery is immediate and reconnect/order recovery is not modeled here.
++
++Week 5 team position limit is ±800 shares per symbol and liquidation threshold is 50% of starting capital. Research caps are at most 150 shares/sleeve, smaller for MM and split combinations; futures cap 20. Entry cash reserve is 60%, gross cap min(40% cash, $70,000), entry equity floor 70%. A 1500-tick window also does not cover the entire scheduled graded hour. These are submission-time constraints, not guarantees against unlimited adverse price moves or exchange faults. A separate verified Week 9 MOC reservation defect allows three 500-share held orders to finish at 1500 shares under a 1000-share cap; this remains unfixed and is not exercised by these strategies. The original venue also has a reproduced matching-before-ACK settlement race: two independent 500-share buys can exceed the team limit. The separate buffered-settlement fixture fixes that isolated order-admission interleaving, but was not silently substituted into the frozen serialized performance runs. Do not treat exchange position rejections as a complete concurrency safety net. The fixed-wire correction may deliver requests during a halt that began after submission; the real exchange must reject them. No strategy knowingly generates new orders for an observed halted symbol.
++
++ARENA10 is an arithmetic price-level average of ten symbols (AAPL, MSFT, NVDA, TSLA, AMZN, GOOGL, META, NFLX, AMD, INTC), not a tradable equity basket in Week 5. Futures are enabled in Week 9, with margin $40/contract and periodic variation settlement. Basket orders have no atomic multileg facility. Opening auctions run; these strategies wait for continuous trading. No real closing auction is simulated at the horizon. The experiments use one isolated venue despite the scenario enabling multi-venue trading; competing venue books/routing are absent. Only four equities plus eligible ARENA10 receive research population liquidity, so universe coverage is narrow and there is no survivorship-free empirical sample.
++
++The archived `max_gross` field is a maximum individual sleeve exposure, not the simultaneous portfolio aggregate. It remains mislabeled in original outputs and must not be used as a team-wide maximum. Position violation counters sampled at boundaries plus zero liquidations are useful observed diagnostics, not formal every-fill proofs. The corrected zero-crossing risk bug has a regression test; full reconnect/duplicate/out-of-order wire and hedge repair guarantees remain outside this serialized backtest.
++
++## Parameter sensitivity and ablations
++
++The sensitivity figure and archived sensitivity CSV contain all 50 parameter settings on only 12 calibration seeds. A is profitable in calibration at confirmation 3/5 but negative at 10/15; holding/trailing changes are much smaller. This fits the simulator’s 15-tick ramp mechanism. C’s width=1 settings are positive while wider quotes are negative, exposing quote/population sensitivity. B’s z-threshold grid gives identical weak results, so its selected threshold is not evidence of a meaningful optimum. All eight D settings lose; higher thresholds mainly reduce activity. A confirmation=3, hold=120, trailing=2; B z=2.5; C width=1, skew=1.5; D z=3.5/lookback=60 were frozen for this audit. The archive’s 550 ablation runs remove fee gate/trailing, reversal/earnings filtering, microprice/adverse/inventory skew and beta/hedging. They are supplied evidence, not independently reexecuted in this audit. Rebate removal and fast refresh here are newly executed mechanism ablations. No claimed profitable improvement is inferred merely from an in-sample parameter maximum. Many comparisons make unadjusted bootstrap confidence intervals exploratory.
++
++## Improvement roadmap (ranked; no untested profit promise)
++
++1. **Repair execution and risk truth first** (implemented separately, moderate complexity): `CorrectedGateway` removes arrival-time resizing, clips reductions, and resets hedge counters. This prevents false safety/profit inference; the fresh evaluation measures resulting performance, not a claim that correctness improves P&L.
++2. **Replace synthetic counterparty assumptions with recorded event/queue evidence** (high complexity, highest research value): extend `MarketPopulation`, receiver journals and historical schema to record order IDs, queue position, arrivals/cancels and fill markouts. Fast-refresh and rebate-off tests measure two dependencies; until queue data exist, market-making alpha remains conditional.
++3. **Make event exits fill-aware and classify continuation/reversal** (moderate complexity, untested profitability): pass actual fills into `PositionStrategy.manage`, use execution VWAP/time and trailing volatility; estimate continuation only from observations after the event, with embargoed day-level validation. Historical A losses make this more urgent than adding more parameter combinations.
++4. **Require executable basket edge and fail-safe hedge repair** (high complexity, no demonstrated alpha): in `Basket.decide` include both touch spreads, rounded leg weights, costs, current depth, beta uncertainty and a stationarity diagnostic; in the gateway pre-reserve both legs and enforce a bounded repair/unwind state machine. Keep it disabled while expected net residual convergence cannot pay both legs.
++5. **Allocate by paired net evidence and run nested chronological validation** (moderate/high complexity, untested live profitability): replace calibration best-setting selection with sparse allocations, confidence bounds and drawdown budgets; cross-validate by complete event/day and independently randomize regime dimensions. Include original, endowed no-trade, terminally matched buy-and-hold, neutral MM and no-rebate baselines. Do not optimize on seeds 3000–3049 after this audit.
++
++## Visualizations
++
++![Preselected seed equity and drawdown](figures/equity_drawdown.png)
++
++![Seed-level incremental net P&L distribution](figures/seed_distribution.png)
++
++![Gross versus net cost decomposition](figures/cost_decomposition.png)
++
++![Calibration parameter sensitivity](figures/calibration_sensitivity.png)
++
++![Fresh held-out execution and cost stresses](figures/stress_sensitivity.png)
++
++## Reproduction commands
++
++Run from the repository root, Python 3.10; matplotlib/numpy available in `.venv310` for report generation. No hosted exchange commands are used.
++
++```bash
++python3 audit_review/code/verify_sources.py
++python3 audit_review/code/run_archive_tests.py
++python3 audit_review/code/run_root_tests.py
++python3 -m pytest audit_review/code/test_audit.py audit_review/code/test_exchange_concurrency.py audit_review/code/test_fifo.py -q
++python3 audit_review/code/audit_study.py --stage reproduce --workers 8
++python3 audit_review/code/audit_study.py --stage fresh --workers 8
++python3 audit_review/code/audit_study.py --stage stress --workers 8
++python3 audit_review/code/reproduce_history.py
++python3 audit_review/code/paired_corrections.py
++python3 audit_review/code/event_coverage.py
++.venv310/bin/python audit_review/code/build_report.py
++```
++
++Each study command overwrites its own stage output; preserve existing results before changing definitions. Protocol JSON records exact seeds/settings/code hash. `reproduce_history.py` requires the external checksum-matched `sessions/` files. Main raw output is JSONL with every equity path and fill journal; tables, reproduction deltas and XML are under `results/`. Figures: equity/drawdown, seed distributions, cost decomposition, calibration sensitivity, and stress sensitivity. Original source/bot versions are preserved for comparison. `effective_configuration.json` records a sanitized whitelist of effective fees and risk parameters; `source_verification.json` checks all 39 archived source fingerprints. Raw JSONL journals and extracted inputs are intentionally ignored by Git but remain saved locally.
++
++## Evidence limits
++
++There is no guarantee of full marks, positive live profit or universal risk safety. Synthetic independent seeds are repetitions of one designed venue population, not independent historical market days. Positive bootstrap intervals do not remove structural model error or multiple-testing concerns. No strategy is established as convincing after-cost historical alpha by the available evidence. The original bot remains Week-5-gated on Weeks 2–4 too, so there is no meaningful active-original historical comparison on the supplied earlier-week tapes.
+diff --git a/audit_review/issues.json b/audit_review/issues.json
+new file mode 100644
+index 0000000..e52ee3b
+--- /dev/null
++++ b/audit_review/issues.json
+@@ -0,0 +1,162 @@
++[
++  {
++    "severity": "High",
++    "file": "engine/exchange/server.py",
++    "function": "ExchangeServer._handle_place_order / close_session",
++    "line": 1146,
++    "finding": "Held MOC orders are absent from book.open_quantity risk reservations; close_session injects them directly into the closing book without a new admission check. Verified Week 9 case: three individually valid 500-share MOC buys produce 1500 shares under a 1000-share team cap.",
++    "resolution": "Unfixed in original and buffered-settlement fixture; no audited alpha uses MOC and performance runs do not close the session. Must reserve held MOC exposure/cash and revalidate auction eligibility before using this order type."
++  },
++  {
++    "severity": "High",
++    "file": "engine/exchange/server.py",
++    "function": "ExchangeServer._handle_place_order",
++    "line": 1226,
++    "finding": "Matching removes liquidity before awaited ACK delivery, while portfolio settlement follows ACK. Concurrent seats can both validate against old team positions. Actual-handler regression produces 1000 shares from two 500-share buys under the Week 5 800-share team cap. Serialized backtests cannot reveal this race.",
++    "resolution": "Separate BufferedSettlementExchange serializes order mutation and buffers outbound delivery until settlement completes; regression rejects the second order. Full production tick/auction/transport coordination remains outside this fixture."
++  },
++  {
++    "severity": "High",
++    "file": "alpha_lab/risk.py",
++    "function": "Gateway.allowed_quantity",
++    "line": 45,
++    "finding": "A reducing flag depends only on initial sign; futures orders can cross flat and bypass the equity, cash and gross entry tests. Regression: short 1, buy 21 with zero cash allowed.",
++    "resolution": "CorrectedGateway clips reducing requests to flat; dedicated regression."
++  },
++  {
++    "severity": "High",
++    "file": "alpha_lab/risk.py",
++    "function": "Gateway.execute_due",
++    "line": 103,
++    "finding": "Rechecks server prices/cash/halt after transport delay and silently changes or discards the already-submitted payload. This is arrival-time privileged control, not ordinary exchange rejection.",
++    "resolution": "CorrectedGateway freezes non-contingent order payload; actual exchange decides arrival acceptance."
++  },
++  {
++    "severity": "High",
++    "file": "alpha_lab/risk.py",
++    "function": "Gateway.execute_due",
++    "line": 119,
++    "finding": "Cumulative group fills are reused across exit retries; minimum hedge of 1 can overhedge fractional first-leg fills. Failure of second-leg admission can leave an unhedged first leg.",
++    "resolution": "Fresh attempt IDs and round-to-zero implemented. Atomicity and bounded unwind remain unresolved."
++  },
++  {
++    "severity": "High",
++    "file": "alpha_lab/runner.py",
++    "function": "MarketPopulation.refresh / flow",
++    "line": 105,
++    "finding": "Synthetic liquidity anchors to the venue reference, with fixed TTL/depth and exogenous buy flow insensitive to actual fees. Our due orders always precede external flow. Matching is real but profitable counterparties are artificial.",
++    "resolution": "Fast quote refresh and no rebate stress tested separately; historical queue claims remain unsupported."
++  },
++  {
++    "severity": "High",
++    "file": "alpha_lab/runner.py",
++    "function": "run_one",
++    "line": 232,
++    "finding": "Last 12 ticks replace strategies, including the original, with an imposed unwind, while buy-and-hold is left marked. No actual closing auction. Exit/terminal costs are not identical between baselines.",
++    "resolution": "Preserved for reproducibility; disclose results as MTM under this terminal convention."
++  },
++  {
++    "severity": "High",
++    "file": "alpha_lab/baselines.py",
++    "function": "Original.observe_async",
++    "line": 45,
++    "finding": "Week gate explicitly disables original in Week 9. It cannot be presented as an active Week 9 baseline. Original also uses different position sizing and public event shape data.",
++    "resolution": "Label inactive Week 9 and avoid equal-risk/feature claims."
++  },
++  {
++    "severity": "Medium",
++    "file": "alpha_lab/baselines.py",
++    "function": "Original.observe_async",
++    "line": 39,
++    "finding": "The original strategy and outbound risk method execute, but the adapter gives direct portfolio snapshots each tick, clears inflight when gateway pending is empty, and does not feed regular leaderboards that advance _venue_tick. Its live wire/clock/recovery behavior is not reproduced.",
++    "resolution": "Preserve this adapter for exact reproduction and label it an adapted original-policy baseline, not an end-to-end production-bot backtest. Correct clocks/ACK delivery and matched terminal rules before an equal-risk strategy comparison."
++  },
++  {
++    "severity": "Medium",
++    "file": "engine/exchange/server.py",
++    "function": "Portfolio.net_worth / ExchangeServer._bidask_marks",
++    "line": 284,
++    "finding": "The venue marks an entire long/short inventory at best bid/ask without sweeping available depth; a tiny own quote can influence valuation. Positive MTM is not necessarily realizable liquidation P&L, especially with halted residual inventory. This matches venue accounting, not an implementation fee error.",
++    "resolution": "Report MTM explicitly, preserve open-overlay diagnostics and require depth-aware terminal liquidation/cash realization in a future matched-terminal study."
++  },
++  {
++    "severity": "Medium",
++    "file": "alpha_lab/metrics.py",
++    "function": "summarize",
++    "line": 7,
++    "finding": "Execution net_fees excludes cancellation fees; unadjusted exports understate costs in Week 9. Archived fee_audit later repairs saved total_net_fees, so distinguish raw function from amended reports.",
++    "resolution": "Independent metrics read actual portfolio fees less rebates, include cancellation debits."
++  },
++  {
++    "severity": "Medium",
++    "file": "alpha_lab/metrics.py",
++    "function": "summarize",
++    "line": 22,
++    "finding": "FIFO combines all sleeves before matching, allowing trades in different accounts to close each other. Win rate has no profit factor and omits cancellation/carry expense.",
++    "resolution": "Independent per-account overlay FIFO avoids cross-seat closes and arbitrary grant reference basis. The report also expenses period cancellation/carry in the profit-factor loss denominator; costs remain separately visible."
++  },
++  {
++    "severity": "Medium",
++    "file": "alpha_lab/metrics.py",
++    "function": "summarize",
++    "line": 45,
++    "finding": "max_gross is maximum sleeve exposure rather than simultaneous portfolio total. Per-tick boundary safety counters do not establish every-fill safety.",
++    "resolution": "Retain field as sleeve maximum; aggregate exposure measurement remains an explicit limitation."
++  },
++  {
++    "severity": "Medium",
++    "file": "alpha_lab/metrics.py",
++    "function": "summarize",
++    "line": 51,
++    "finding": "Same-tick counter excludes fills missing decision provenance. Zero is not evidence that every fill had valid provenance.",
++    "resolution": "Independent missing_fill_provenance counter exported."
++  },
++  {
++    "severity": "Medium",
++    "file": "team/alpha/core.py",
++    "function": "PositionStrategy.manage",
++    "line": 145,
++    "finding": "Stops and holding duration initialize from first observed inventory change and observed midpoint, not actual weighted execution prices/times. Delayed/partial fills change realized stop risk.",
++    "resolution": "Needs fill-aware plan state before live deployment; not silently changed during frozen test."
++  },
++  {
++    "severity": "Medium",
++    "file": "team/alpha/basket.py",
++    "function": "Basket.decide",
++    "line": 36,
++    "finding": "Beta is constrained positive without stationarity checks; log price residual z-score need not be mean reverting. Cost gate omits actual futures spread and integer hedge error.",
++    "resolution": "Keep experimental; no profitable claim. Disable until net edge and hedge repairs demonstrated."
++  },
++  {
++    "severity": "Medium",
++    "file": "team/alpha/market_making.py",
++    "function": "AdaptiveMarketMaker.decide",
++    "line": 32,
++    "finding": "Inventory skew targets half cap, so long exposure and spread/rebate earnings are mixed. Adverse-selection filter is a volatility/trend proxy, not a conditional fill-markout estimate.",
++    "resolution": "Compare with no-trade and rebate-off stress; true neutral sizing requires borrow/short policy changes."
++  },
++  {
++    "severity": "Medium",
++    "file": "alpha_lab/runner.py",
++    "function": "MarketPopulation.__init__",
++    "line": 108,
++    "finding": "Spread, depth, TTL and informedness all depend on seed modulo 3, so their marginal effects are confounded. Seed replication alone cannot identify spread sensitivity.",
++    "resolution": "Separate TTL intervention provided; independent factorial regime randomization remains future work."
++  },
++  {
++    "severity": "Medium",
++    "file": "alpha_lab/experiment.py",
++    "function": "select / run_batch",
++    "line": 87,
++    "finding": "Only 12 calibration seeds across 50 settings and many comparisons; bootstrap intervals condition on generator and ignore selection/multiple testing. Previously viewed OOS seeds cannot be reused as fresh evidence.",
++    "resolution": "Frozen parameters tested on seeds 3000-3049; no new optimization or positive live-alpha conclusion."
++  },
++  {
++    "severity": "Low",
++    "file": "alpha_lab/metrics.py",
++    "function": "summarize",
++    "line": 15,
++    "finding": "Session Sharpe scales by sqrt(number of ticks); it is not annualized and serial returns make standard iid inference unreliable. Fill win rate is not round-trip trade win rate.",
++    "resolution": "Explicit metric labels and paired seed-level inference in audit report."
++  }
++]
+\ No newline at end of file
+diff --git a/audit_review/code/atomic_exchange.py b/audit_review/code/atomic_exchange.py
+new file mode 100644
+index 0000000..a6ee74f
+--- /dev/null
++++ b/audit_review/code/atomic_exchange.py
+@@ -0,0 +1,39 @@
++"""Local audit fixture: serialize order mutation and defer outbound delivery.
++
++Preserves original exchange validation, order types, matching and accounting.
++The owner task may recursively activate stops. Outbound ACKs/fills keep their
++original within-handler ordering but cannot suspend matching before settlement.
++This is a research fixture, not a complete production event-loop patch: session
++transitions, auction clearing and tick mutation still require coordinated venue
++serialization, and real transports need per-connection ordered outbound queues.
++"""
++import asyncio
++from alpha_lab.exchange import OfflineExchange
++
++class BufferedSettlementExchange(OfflineExchange):
++    def __init__(self):
++        super().__init__();self._mutation_lock=asyncio.Lock();self._mutation_owner=None;self._outbox=None
++    async def _deliver_send(self,ws,msg):
++        await super()._send(ws,msg)
++    async def _deliver_broadcast(self,msg,skip_ids=None):
++        await super()._broadcast(msg,skip_ids)
++    async def _send(self,ws,msg):
++        if self._mutation_owner is asyncio.current_task():self._outbox.append(('send',ws,msg))
++        else:await self._deliver_send(ws,msg)
++    async def _broadcast(self,msg,skip_ids=None):
++        if self._mutation_owner is asyncio.current_task():self._outbox.append(('broadcast',msg,skip_ids))
++        else:await self._deliver_broadcast(msg,skip_ids)
++    async def _handle_place_order(self,ws,msg,team_id):
++        if self._mutation_owner is asyncio.current_task():
++            return await super()._handle_place_order(ws,msg,team_id)
++        async with self._mutation_lock:
++            self._mutation_owner=asyncio.current_task();self._outbox=[]
++            try:
++                result=await super()._handle_place_order(ws,msg,team_id)
++                events=self._outbox
++            finally:
++                self._mutation_owner=None;self._outbox=None
++        for kind,a,b in events:
++            if kind=='send':await self._deliver_send(a,b)
++            else:await self._deliver_broadcast(a,b)
++        return result
+diff --git a/audit_review/code/audit_study.py b/audit_review/code/audit_study.py
+new file mode 100644
+index 0000000..c8a4722
+--- /dev/null
++++ b/audit_review/code/audit_study.py
+@@ -0,0 +1,142 @@
++"""Independent offline reproduction and frozen fresh-seed audit; originals untouched."""
++import sys, os, json, asyncio, argparse, hashlib, time
++from pathlib import Path
++from concurrent.futures import ProcessPoolExecutor, as_completed
++from collections import defaultdict, deque
++from dataclasses import replace
++ROOT=Path(__file__).resolve().parents[2]
++ARCHIVE=ROOT/'audit_review/extracted/2026Autumn-6-fresh'
++sys.path.insert(0,str(ARCHIVE))
++from network_guard import install
++install()
++import arena
++from alpha_lab import runner
++from alpha_lab.risk import Gateway
++from shared.messages import PlaceOrder,CancelOrder
++from team.alpha.core import Intent
++from exchange import config as cfg
++BASE_GATEWAY=Gateway
++BASE_SUMMARY=runner.summarize
++BASE_REFRESH=runner.MarketPopulation.refresh
++
++class CorrectedGateway(Gateway):
++    """Reservation at decision; fixed wire payload; exchange alone rejects arrival state.
++
++    Contingent basket hedge is a NEW decision when its first leg has filled.
++    It receives a fresh reservation check, and can round to zero (never force 1).
++    """
++    def allowed_quantity(self,intent,exclude=None):
++        p=self.server.portfolios[self.account];pos=p.positions.get(intent.symbol,0)
++        reduces=(intent.side=='buy' and pos<0) or (intent.side=='sell' and pos>0)
++        # Clip a reducing intent to flat: cannot exploit an entry-budget bypass.
++        if reduces:intent=replace(intent,quantity=min(intent.quantity,abs(pos)))
++        return super().allowed_quantity(intent,exclude)
++    def schedule(self,intents,obs):
++        # Every new two-leg attempt gets fresh fill counters; retries do not
++        # inherit previous exit fills under a reused group identifier.
++        rewritten=[];groups={}
++        for i in intents:
++            if i.group:
++                groups.setdefault(i.group,f'{i.group}@{obs.tick}')
++                i=replace(i,group=groups[i.group])
++            rewritten.append(i)
++        return super().schedule(rewritten,obs)
++    async def execute_due(self,tick):
++        due=sorted(x for x in self.queue if x[0]<=tick)
++        self.queue=[x for x in self.queue if x[0]>tick]
++        for _,_,kind,e in due:
++            key=(e.symbol,e.side)
++            if self.rx.pending.get(key) is not e:continue
++            if kind=='cancel':
++                await self.server._handle_cancel_order(self.account,CancelOrder(team_id=self.account,symbol=e.symbol,order_id=e.oid),self.account)
++                if e.oid not in self.server.books[e.symbol]._orders:self.rx.pending.pop(key,None)
++                continue
++            if e.group and self.group_orders[e.group]!=e.symbol:
++                first=self.group_orders[e.group]
++                filled=self.rx.group_fills.get((e.group,first),0)
++                qty=round(e.quantity*min(1.,filled/max(1,self.group_first_requested[e.group])))
++                qty=self.allowed_quantity(Intent(e.symbol,e.side,qty,e.price,e.kind),exclude=e) if qty else 0
++                if not qty:
++                    self.rx.pending.pop(key,None);self.hedge_failures+=1;continue
++                e.quantity=qty
++            # Do not consult a later price, halt or cash snapshot to alter an
++            # order already in transport. Exchange rejection is observable.
++            await self.server._handle_place_order(self.account,PlaceOrder(team_id=self.account,symbol=e.symbol,side=e.side,order_type=e.kind,price=e.price,quantity=e.quantity),self.account)
++            if e.kind=='ioc' or not e.oid or e.oid not in self.server.books[e.symbol]._orders:self.rx.pending.pop(key,None)
++        self.sample_risk()
++
++def summarize(s,accounts,receivers,gateways,curve,initial,starting_positions,starting_marks):
++    out=BASE_SUMMARY(s,accounts,receivers,gateways,curve,initial,starting_positions,starting_marks)
++    fees=sum(s.portfolios[a].total_fees_paid-s.portfolios[a].total_rebates_earned for a in accounts)
++    out['total_net_fees']=fees;out['cancellation_fees_paid']=fees-out['net_fees']
++    out['gross_pnl_before_execution_fees']=out['pnl']+fees
++    # Match each account independently. Grants are per sleeve (same grant),
++    # not a pooled position that can close one sleeve against another.
++    closed=[];journal=[]
++    for account,rx in zip(accounts,receivers):
++        # Infer exact starting inventory from final positions minus all fills.
++        initial_pos=dict(s.portfolios[account].positions)
++        for f in rx.fills:initial_pos[f['symbol']]=initial_pos.get(f['symbol'],0)-f['quantity']*(1 if f['side']=='buy' else -1)
++        lots=defaultdict(deque)
++        for sym,q in initial_pos.items():
++            if q:lots[sym].append([q,starting_marks[sym],0.])
++        for f in rx.fills:
++            journal.append(dict(f,account=account))
++            signed=f['quantity']*(1 if f['side']=='buy' else -1);unit=(f['fee']-f['rebate'])/f['quantity'];pnl=0.;matched=False
++            while signed and lots[f['symbol']] and signed*lots[f['symbol']][0][0]<0:
++                lot=lots[f['symbol']][0];q=min(abs(signed),abs(lot[0]));direction=1 if lot[0]>0 else -1
++                pnl+=q*((f['price']-lot[1])*direction-lot[2]-unit)
++                lot[0]-=direction*q;signed+=direction*q;matched=True
++                if not lot[0]:lots[f['symbol']].popleft()
++            if signed:lots[f['symbol']].append([signed,f['price'],unit])
++            if matched:closed.append(pnl)
++    gains=sum(x for x in closed if x>0);losses=-sum(x for x in closed if x<0)
++    out.update(closed_gains=gains,closed_losses=losses,profit_factor=(gains/losses if losses else None),
++        fifo_win_rate=sum(x>0 for x in closed)/len(closed) if closed else None,fifo_closed_fills=len(closed),
++        missing_fill_provenance=sum(f['decision_tick'] is None for f in journal),
++        audit_equity_curve=curve,audit_fills=journal)
++    return out
++
++async def fast_refresh(self,force=False):
++    self.ttl=1
++    return await BASE_REFRESH(self,force)
++
++PARAMS={'event_momentum':{'confirmation':3,'holding':120,'trailing':2.},'post_halt':{'z':2.5},'market_making':{'width':1.,'skew':1.5},'basket':{'z':3.5,'lookback':60}}
++def components(name):
++    if name=='combined':return [('event_momentum',PARAMS['event_momentum']),('post_halt',PARAMS['post_halt'])]
++    if name=='combined_profit':return [('event_momentum',PARAMS['event_momentum']),('market_making',PARAMS['market_making'])]
++    return [(name,PARAMS.get(name,{}))]
++
++def job(payload):
++    seed,week,mode,stress,names=payload
++    runner.Gateway=BASE_GATEWAY if mode=='reproduce' else CorrectedGateway
++    runner.summarize=summarize
++    runner.MarketPopulation.refresh=fast_refresh if stress=='fast_quotes' else BASE_REFRESH
++    # isolated() saves this value and preserves it inside the experiment.
++    cfg.MAKER_REBATE_RATE=0. if stress=='no_rebate' else .001
++    result=[]
++    for name in names:
++        r=asyncio.run(runner.run_one(seed,components(name),ticks=1500,week=week,stress=stress))
++        r.update(candidate=name,mode=mode);result.append(r)
++    return result
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--stage',choices=['reproduce','fresh','stress'],required=True);ap.add_argument('--workers',type=int,default=8);ap.add_argument('--seeds',type=int,default=50);args=ap.parse_args()
++    out=ROOT/'audit_review/results';out.mkdir(exist_ok=True)
++    names=list(PARAMS)+['original','buy_hold','no_trade','combined','combined_profit']
++    if args.stage=='stress':names=['event_momentum','market_making','original','no_trade','combined_profit']
++    start=1000 if args.stage=='reproduce' else 3000
++    stresses=['fast_quotes','no_rebate','fees_60bps','latency_3ticks'] if args.stage=='stress' else ['base']
++    mode='reproduce' if args.stage=='reproduce' else 'corrected'
++    jobs=[(seed,week,mode,stress,names) for stress in stresses for week in (5,9) for seed in range(start,start+args.seeds)]
++    protocol={'stage':args.stage,'seeds':list(range(start,start+args.seeds)),'names':names,'stresses':stresses,'ticks':1500,'mode':mode,'params':PARAMS,'python':sys.version,'archive_sha256':json.loads((ROOT/'audit_review/archive_manifest.json').read_text()).get('sha256'),'code_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
++    (out/(args.stage+'_protocol.json')).write_text(json.dumps(protocol,indent=2))
++    t=time.monotonic();count=0
++    with (out/(args.stage+'.jsonl')).open('w') as f,ProcessPoolExecutor(max_workers=args.workers) as pool:
++        futures=[pool.submit(job,j) for j in jobs]
++        for future in as_completed(futures):
++            rows=future.result()
++            for r in rows:f.write(json.dumps(r,allow_nan=False)+'\n')
++            f.flush();count+=1
++            if count%10==0 or count==len(jobs):print(args.stage,count,'/',len(jobs),'runs',count*len(names),'seconds',round(time.monotonic()-t),flush=True)
++if __name__=='__main__':main()
+diff --git a/audit_review/code/build_report.py b/audit_review/code/build_report.py
+new file mode 100644
+index 0000000..65737f9
+--- /dev/null
++++ b/audit_review/code/build_report.py
+@@ -0,0 +1,233 @@
++"""Build audit tables/figures from executed runs, never fill missing results."""
++from pathlib import Path
++import os,json,csv,math,sys
++from collections import defaultdict
++from statistics import mean
++ROOT=Path(__file__).resolve().parents[2];OUT=ROOT/'audit_review';RESULTS=OUT/'results';ARCHIVE=OUT/'extracted/2026Autumn-6-fresh'
++os.environ['MPLCONFIGDIR']=str(OUT/'mpl_cache')
++import numpy as np
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib.pyplot as plt
++from findings import ISSUES
++ISSUES=sorted(ISSUES,key=lambda x: {'Critical':0,'High':1,'Medium':2,'Low':3}[x[0]])
++from fifo import overlay_fifo
++
++def load(stage):
++ p=RESULTS/(stage+'.jsonl')
++ return [json.loads(x) for x in p.open()] if p.exists() else []
++def save_csv(path,rows):
++ if not rows:return
++ keys=list(dict.fromkeys(k for r in rows for k in r))
++ with path.open('w',newline='') as f:
++  w=csv.DictWriter(f,fieldnames=keys);w.writeheader();w.writerows(rows)
++def ci(v):
++ v=np.array(v);rng=np.random.default_rng(456789)
++ return np.quantile(v[rng.integers(0,len(v),size=(5000,len(v)))].mean(axis=1),[.025,.975]).tolist()
++def table(rows,cols):
++ def fmt(v):
++  if v is None:return 'N/A'
++  if isinstance(v,float):return f'{v:,.2f}'
++  return str(v)
++ return '| '+' | '.join(cols)+' |\n| '+' | '.join('---' for _ in cols)+' |\n'+'\n'.join('| '+' | '.join(fmt(r.get(k)) for k in cols)+' |' for r in rows)
++
++def main():
++ fresh=load('fresh');stress=load('stress');repro=load('reproduce');paired=load('paired_corrections')
++ for name,rows,expected in [('fresh',fresh,900),('stress',stress,2000),('reproduce',repro,900),('paired_corrections',paired,500)]:
++  if len(rows)!=expected:raise RuntimeError(f'{name}: incomplete study ({len(rows)}/{expected}); refusing a final report')
++ for row in fresh+stress:
++  row['overlay_fifo']=overlay_fifo(row['audit_fills'])
++ baseline={(r['week'],r['seed'],r['stress']):r['pnl'] for r in fresh+stress if r['candidate']=='no_trade'}
++ groups=defaultdict(list)
++ for r in fresh+stress:groups[(r['week'],r['candidate'],r['stress'])].append(r)
++ summary=[]
++ for (week,name,regime),rows in sorted(groups.items()):
++  excess=[r['pnl']-baseline[(week,r['seed'],regime)] for r in rows];lo,hi=ci(excess)
++  gains=sum(r['overlay_fifo']['gains'] for r in rows);losses=sum(r['overlay_fifo']['losses'] for r in rows)
++  closed=sum(r['overlay_fifo']['count'] for r in rows)
++  wins=sum(r['overlay_fifo']['wins'] for r in rows)
++  summary.append(dict(availability='inactive_week_gate' if name=='original' and week==9 else rows[0]['availability'],evidence_quality={'event_momentum':'Synthetic OOS; three negative historical overlays','post_halt':'Synthetic OOS; sparse activity; no historical trades','market_making':'Synthetic OOS; no empirical queue validation','basket':'Week 5 disabled; sparse Week 9 synthetic trades','original':'Adapted actual policy; inactive Week 9','buy_hold':'30% capital benchmark; terminal not matched','no_trade':'Endowed inventory reference','combined':'Synthetic OOS; split independent sleeves','combined_profit':'Synthetic OOS; no empirical combined replay'}[name],week=week,strategy=name,regime=regime,seeds=len(set(r['seed'] for r in rows)),net_pnl=mean(r['pnl'] for r in rows),
++   excess_no_trade=mean(excess),excess_ci_low=lo,excess_ci_high=hi,gross_pnl=mean(r['gross_pnl_before_execution_fees'] for r in rows),
++   session_sharpe=mean(r['session_sharpe'] for r in rows),worst_drawdown_pct=100*max(r['max_drawdown'] for r in rows),
++   closed_fill_profit_factor=gains/losses if losses else None,profit_factor=gains/(losses+sum(r['cancellation_fees_paid']+r['carry_paid'] for r in rows)) if losses+sum(r['cancellation_fees_paid']+r['carry_paid'] for r in rows)>0 else None,closed_fill_win_rate_pct=100*wins/closed if closed else None,
++   mean_turnover=mean(r['turnover'] for r in rows),mean_net_transaction_costs=mean(r['total_net_fees'] for r in rows),
++   mean_commissions=mean(r['commissions'] for r in rows),mean_rebates=mean(r['maker_rebates'] for r in rows),mean_cancel_costs=mean(r['cancellation_fees_paid'] for r in rows),
++   mean_slippage=mean(r['slippage_vs_decision_mid'] for r in rows),mean_carry=mean(r['carry_paid'] for r in rows),mean_fills=mean(r['fills'] for r in rows),total_closed_fills=closed,
++   liquidations=sum(r['liquidations'] for r in rows),position_violations=sum(r['position_violations'] for r in rows),team_violations=sum(r['team_position_violations'] for r in rows),
++   missing_fill_provenance=sum(r['missing_fill_provenance'] for r in rows),same_tick_fills=sum(r['same_tick_fills'] for r in rows),
++   hedge_failures=sum(r['hedge_failures'] for r in rows),mean_open_overlay=mean(r['open_overlay_shares'] for r in rows)))
++ pairs=[]
++ for week in (5,9):
++  for left,right in [('market_making','event_momentum'),('combined_profit','event_momentum'),('original','event_momentum')]:
++   a={r['seed']:r['pnl'] for r in fresh if r['week']==week and r['candidate']==left}
++   b={r['seed']:r['pnl'] for r in fresh if r['week']==week and r['candidate']==right}
++   delta=[a[seed]-b[seed] for seed in sorted(a.keys()&b.keys())];lo,hi=ci(delta)
++   pairs.append(dict(week=week,left=left,right=right,seeds=len(delta),mean_difference=mean(delta),ci_low=lo,ci_high=hi))
++ save_csv(RESULTS/'pairwise_comparisons.csv',pairs)
++ save_csv(RESULTS/'strategy_metrics.csv',summary);(RESULTS/'strategy_metrics.json').write_text(json.dumps(summary,indent=2))
++ # Supplied primary result reproduction is an exact deterministic comparison.
++ supplied=json.loads((ARCHIVE/'alpha_results/study/out_of_sample.json').read_text());lookup={(r['week'],r['seed'],r['candidate']):r for r in supplied}
++ diffs=[]
++ for r in repro:
++  old=lookup.get((r['week'],r['seed'],r['candidate']))
++  if old:diffs.append(dict(week=r['week'],seed=r['seed'],strategy=r['candidate'],pnl_delta=r['pnl']-old['pnl'],fills_delta=r['fills']-old['fills']))
++ save_csv(RESULTS/'reproduction_comparison.csv',diffs)
++ verification={'reproduced_runs':len(repro),'matched_primary_runs':len(diffs),'max_absolute_pnl_difference':max((abs(x['pnl_delta']) for x in diffs),default=None),'fill_count_mismatches':sum(x['fills_delta']!=0 for x in diffs)}
++ hist=json.loads((RESULTS/'historical_reproduced.json').read_text()) if (RESULTS/'historical_reproduced.json').exists() else []
++ oldhist=json.loads((ARCHIVE/'alpha_results/study/historical.json').read_text());hl={(Path(r['file']).name,r['strategy']):r for r in oldhist}
++ hd=[]
++ for r in hist:
++  b=next((x['pnl'] for x in hist if x['file']==r['file'] and x['strategy']=='no_trade'),None)
++  old=hl.get((Path(r['file']).name,r['strategy']))
++  hd.append(dict(file=Path(r['file']).name,strategy=r['strategy'],net_pnl=r['pnl'],excess_no_trade=r['pnl']-b if b is not None else None,commissions=r['commissions'],slippage=r['slippage_vs_decision_mid'],fills=r['fills'],pnl_reproduction_delta=r['pnl']-old['pnl'] if old else None))
++ save_csv(RESULTS/'historical_comparison.csv',hd)
++ verification.update(historical_runs=len(hist),historical_max_pnl_difference=max((abs(x['pnl_reproduction_delta']) for x in hd if x['pnl_reproduction_delta'] is not None),default=None))
++ oldpaired={(r['week'],r['seed'],r['candidate']):r for r in repro}
++ effects=defaultdict(list)
++ for r in paired:
++  old=oldpaired[(r['week'],r['seed'],r['candidate'])]
++  effects[(r['week'],r['candidate'])].append(dict(pnl=r['pnl']-old['pnl'],fills=r['fills']-old['fills'],fees=r['total_net_fees']-old['total_net_fees']))
++ effect_rows=[]
++ for (week,name),items in sorted(effects.items()):
++  lo,hi=ci([x['pnl'] for x in items]);effect_rows.append(dict(week=week,strategy=name,seeds=len(items),mean_pnl_change=mean(x['pnl'] for x in items),min_pnl_change=min(x['pnl'] for x in items),max_pnl_change=max(x['pnl'] for x in items),ci_low=lo,ci_high=hi,mean_fill_change=mean(x['fills'] for x in items)))
++ save_csv(RESULTS/'paired_correction_effects.csv',effect_rows)
++ verification['paired_correction_runs']=len(paired)
++ (RESULTS/'reproduction_verification.json').write_text(json.dumps(verification,indent=2))
++ (OUT/'issues.json').write_text(json.dumps([dict(severity=x[0],file=x[1],function=x[2],line=x[3],finding=x[4],resolution=x[5]) for x in ISSUES],indent=2))
++ figs=OUT/'figures';figs.mkdir(exist_ok=True)
++ # Every seed's curve saved, illustrative path fixed before seeing outcomes.
++ fig,axes=plt.subplots(2,2,figsize=(13,8))
++ for week,col in [(5,0),(9,1)]:
++  for name in ['original','event_momentum','post_halt','market_making','basket','combined_profit','buy_hold','no_trade']:
++   r=next((r for r in fresh if r['week']==week and r['seed']==3000 and r['candidate']==name),None)
++   if not r:continue
++   eq=np.array([r['initial_equity']]+r['audit_equity_curve']);axes[0,col].plot(eq-eq[0],label=name,lw=1);axes[1,col].plot(100*(eq/np.maximum.accumulate(eq)-1),lw=1)
++  axes[0,col].set_title(f'Week {week}, preselected seed 3000');axes[0,col].set_ylabel('MTM P&L ($)');axes[1,col].set_ylabel('Drawdown (%)');axes[1,col].set_xlabel('Tick')
++ axes[0,1].legend(fontsize=7);fig.tight_layout();fig.savefig(figs/'equity_drawdown.png',dpi=150);plt.close(fig)
++ fig,axes=plt.subplots(1,2,figsize=(13,5))
++ names=['original','event_momentum','market_making','post_halt','basket','combined_profit','buy_hold']
++ for ax,week in zip(axes,[5,9]):
++  data=[[r['pnl']-baseline[(week,r['seed'],'base')] for r in fresh if r['week']==week and r['candidate']==n] for n in names]
++  ax.boxplot(data,tick_labels=names,showmeans=True);ax.axhline(0,color='k',lw=.7);ax.tick_params(axis='x',rotation=45);ax.set_title(f'Week {week}: paired excess vs no trade');ax.set_ylabel('$ per seed')
++ fig.tight_layout();fig.savefig(figs/'seed_distribution.png',dpi=150);plt.close(fig)
++ fig,axes=plt.subplots(1,2,figsize=(13,5))
++ for ax,week in zip(axes,[5,9]):
++  data=[next(r for r in summary if r['week']==week and r['regime']=='base' and r['strategy']==n) for n in names]
++  x=np.arange(len(names));ax.bar(x-.24,[r['gross_pnl'] for r in data],.24,label='Gross before net fees');ax.bar(x,[r['mean_net_transaction_costs'] for r in data],.24,label='Net fees (negative = rebate)');ax.bar(x+.24,[r['net_pnl'] for r in data],.24,label='After-fee MTM');ax.set_xticks(x,names,rotation=45);ax.set_title(f'Week {week} cost decomposition');ax.set_ylabel('$')
++ axes[1].legend(fontsize=7);fig.tight_layout();fig.savefig(figs/'cost_decomposition.png',dpi=150);plt.close(fig)
++ sens=json.loads((ARCHIVE/'alpha_results/study/sensitivity.json').read_text())
++ fig,axes=plt.subplots(2,3,figsize=(15,8))
++ def heat(ax,name,xkey,xvals,ykey,yvals,extra,title):
++  cells=np.array([[next(r['mean_excess_no_trade'] for r in sens if r['strategy']==name and r['params'][xkey]==x and r['params'][ykey]==y and all(r['params'][k]==v for k,v in extra.items())) for x in xvals] for y in yvals])
++  bound=max(1,float(np.abs(cells).max()));im=ax.imshow(cells,cmap='RdYlGn',vmin=-bound,vmax=bound,aspect='auto')
++  ax.set_xticks(range(len(xvals)),xvals);ax.set_yticks(range(len(yvals)),yvals);ax.set_xlabel(xkey);ax.set_ylabel(ykey);ax.set_title(title)
++  for y in range(len(yvals)):
++   for x in range(len(xvals)):ax.text(x,y,f'{cells[y,x]:.0f}',ha='center',va='center',fontsize=8)
++  fig.colorbar(im,ax=ax,label='Mean excess $')
++ heat(axes[0,0],'event_momentum','holding',[20,40,60,120],'confirmation',[3,5,10,15],{'trailing':2.},'A: trailing=2 (calibration)')
++ heat(axes[0,1],'event_momentum','holding',[20,40,60,120],'confirmation',[3,5,10,15],{'trailing':4.},'A: trailing=4 (calibration)')
++ for ax,name,label in [(axes[0,2],'post_halt','B: reversal threshold'),(axes[1,1],'basket','D: residual threshold')]:
++  for lookback in ([60,120] if name=='basket' else [None]):
++   rows=sorted([r for r in sens if r['strategy']==name and (lookback is None or r['params']['lookback']==lookback)],key=lambda r:r['params']['z'])
++   ax.plot([r['params']['z'] for r in rows],[r['mean_excess_no_trade'] for r in rows],marker='o',label=f'lookback={lookback}')
++  ax.axhline(0,color='k',lw=.7);ax.set_title(label);ax.set_xlabel('z threshold');ax.set_ylabel('Mean excess $')
++  if name=='basket':ax.legend(fontsize=8)
++ heat(axes[1,0],'market_making','width',[1.,1.5,2.5],'skew',[.5,1.5],{},'C: width / inventory skew')
++ axes[1,2].axis('off');axes[1,2].text(.05,.8,'Supplied calibration only\n12 seeds per setting\n50 parameter settings\nCells: paired excess over no-trade\nNo parameter refit on fresh seeds',va='top',fontsize=11)
++ fig.tight_layout();fig.savefig(figs/'calibration_sensitivity.png',dpi=150);plt.close(fig)
++ if stress:
++  fig,axes=plt.subplots(1,2,figsize=(13,5))
++  for ax,week in zip(axes,[5,9]):
++   for name in ['original','event_momentum','market_making','combined_profit']:
++    regimes=['base','fees_60bps','latency_3ticks','fast_quotes','no_rebate'];rs=[next((r for r in summary if r['week']==week and r['strategy']==name and r['regime']==s),None) for s in regimes]
++    ax.plot(regimes,[r['excess_no_trade'] if r else np.nan for r in rs],marker='o',label=name)
++   ax.axhline(0,color='k',lw=.7);ax.tick_params(axis='x',rotation=30);ax.set_title(f'Week {week} frozen-seed stress');ax.set_ylabel('Mean excess $')
++  axes[1].legend();fig.tight_layout();fig.savefig(figs/'stress_sensitivity.png',dpi=150);plt.close(fig)
++ # Per-regime conditioned statistics; not independent factorial estimates.
++ conditions=[]
++ for (week,name,regime),rows in groups.items():
++  if regime!='base':continue
++  for spread in sorted(set(r['spread_bps'] for r in rows)):
++   selected=[r for r in rows if r['spread_bps']==spread];conditions.append(dict(week=week,strategy=name,spread_bps=spread,seeds=len(selected),mean_excess=mean(r['pnl']-baseline[(week,r['seed'],'base')] for r in selected)))
++ save_csv(RESULTS/'regime_conditions.csv',conditions)
++ vol_conditions=[];rejections=[]
++ for (week,name,regime),rows in groups.items():
++  counts=defaultdict(int)
++  for r in rows:
++   for code,n in r['rejects'].items():counts[code]+=n
++  for code,n in counts.items():rejections.append(dict(week=week,strategy=name,regime=regime,code=code,count=n))
++  if regime=='base':
++   for vol in sorted(set(r['volatility_multiplier'] for r in rows)):
++    selected=[r for r in rows if r['volatility_multiplier']==vol]
++    vol_conditions.append(dict(week=week,strategy=name,volatility_multiplier=vol,seeds=len(selected),mean_excess=mean(r['pnl']-baseline[(week,r['seed'],'base')] for r in selected)))
++ save_csv(RESULTS/'volatility_regimes.csv',vol_conditions);save_csv(RESULTS/'order_rejections.csv',rejections)
++ supplied_stress=json.loads((ARCHIVE/'alpha_results/study/summary.json').read_text())
++ supplied_stress=[dict(week=r['week'],strategy=r['strategy'],regime=r['stress'],seeds=r['n_seeds'],mean_excess=r['mean_excess_no_trade'],ci_low=r['excess_ci95'][0],ci_high=r['excess_ci95'][1],net_fees=r['mean_net_fees']) for r in supplied_stress if r['stress']!='base']
++ save_csv(RESULTS/'supplied_stress_summary.csv',supplied_stress)
++
++ event_file=RESULTS/'event_direction_conditions.csv'
++ with event_file.open() as f:
++  event_conditions=[dict(r,week=int(r['week']),event_tick=int(r['event_tick']),seeds=int(r['seeds']),mean_excess=float(r['mean_excess'])) for r in csv.DictReader(f) if r['strategy'] in ['event_momentum','market_making','combined_profit']]
++ base=sorted([r for r in summary if r['regime']=='base'],key=lambda r:(r['week'],-r['excess_no_trade']))
++ eligible={n:[r for r in base if r['strategy']==n and (n!='basket' or r['week']==9)] for n in ['event_momentum','post_halt','market_making','basket']}
++ best_mean=max(eligible,key=lambda n:mean(r['excess_no_trade'] for r in eligible[n]))
++ worst_mean=min(eligible,key=lambda n:mean(r['excess_no_trade'] for r in eligible[n]))
++ robust={n:min(r['excess_ci_low'] for r in summary if r['strategy']==n) for n in ['event_momentum','market_making']}
++ best_robust=max(robust,key=robust.get)
++ verdict=f'By mean incremental net P&L across eligible weeks, the best new single strategy is **{best_mean}** and the weakest is **{worst_mean}**. Among the two active single-strategy finalists, **{best_robust}** has the strongest minimum lower confidence bound across tested base/cost/execution regimes ({robust[best_robust]:.2f} dollars). This conservative descriptive ranking is conditional on the generator and is not an adjusted multi-test confidence statement. The A+C portfolio is the strongest new combined candidate by base mean P&L; the original dominates absolute Week 5 simulated returns, with different sizing and information.'
++ (RESULTS/'executive_verdict.json').write_text(json.dumps(dict(best_new_mean=best_mean,worst_new_mean=worst_mean,best_single_robustness=best_robust,minimum_lower_bounds=robust),indent=2))
++
++ lines=['# Independent AlgoArena quantitative audit','',
++ '## Executive verdict','',verdict,'',
++ 'The primary ranking below is the newly executed, frozen-parameter evaluation on seeds 3000–3049, using the corrected research gateway. Positive synthetic performance is evidence about this specified generator, not convincing real-market alpha. Historical event momentum is negative relative to no-trade on all three available recordings. Do not promote these alphas to the proven live bot on this evidence.',
++ '', 'The original Week 5 strategy must be judged separately: it trades larger risk and uses public calendar shock-shape information. In Week 9 it is explicitly disabled. The best new strategy and combined portfolio are identified by after-fee excess below; no-trade is the proper endowed-inventory comparator.',
++ '', '## Executed evidence and reproducibility','','```json\n'+json.dumps(verification,indent=2)+'\n```','',
++ 'Archive SHA256: `1fe1d222c67447ace8f14ba5bcc2a9a8e1ce91e3b0303a5d344ba84f23f7cf76`. Extracted code is preserved unchanged under `extracted/2026Autumn-6-fresh`. All new code, output and fixes live under `audit_review/`; `.env` and live bot code were not edited by this audit.',
++ '', 'Archive tests: **317 passed, 3 skipped**, 320 collected, 0 failures/errors (see XML). The root repository suite also passed **317 tests with 3 skips**, with extracted copies excluded from default discovery. Audit regressions: **14 passed**. The first sandboxed root run had two localhost-binding permission failures; the permitted rerun passed with the non-loopback guard still active. Network guard blocks non-loopback socket connections; only isolated local mechanics are used. The tests that require live smoke execution remain skipped. Diagnostic regressions intentionally reproduce two unsafe original-exchange outcomes; a passing diagnostic is evidence that the bug exists, not that the original venue was repaired. The corrected fixture is tested separately against the ACK settlement interleaving.',
++ '', f'Executed synthetic trials in this audit: reproduction {len(repro)}, fresh corrected {len(fresh)}, corrected stress {len(stress)}, paired correction diagnostics {len(paired)}. Each complete comparison uses 50 identical exogenous seeds per strategy/week; price paths can respond to the candidate’s actual order impact, so realized prices are not artificially forced identical; weeks are different scenarios using the same seed IDs, not 100 independent seeds. Seeds 1000–1049 are reproduction only; new seeds 3000–3049 were fixed before inspecting outcomes. No parameter retuning on them.',
++ '', 'The ZIP omits all three historical recordings. Local external copies match the archived SHA256 inventory exactly; 15 funded historical replays are reproduced separately. This is not a self-contained archive and these previously inspected days are not pristine held-out data. There is no Week 5 historical tape. Synthetic experiments never silently stand in for historical backtests.',
++ '', 'Supplied files document 624 calibration, 800 primary OOS, 550 ablation, 2400 stress, 500 secondary confirmation and 900 secondary stress runs: 5774 seeded trials, 112 distinct seed IDs (12 calibration + 50 primary + 50 confirmation). Fee-audit replays, illustrative curves and historical replays are not additional independent seeds. Saved outputs show execution, but only the explicitly reproduced subsets are independently verified here.',
++ '', '## Fresh out-of-sample ranking','',
++ table(base,['week','strategy','seeds','net_pnl','excess_no_trade','excess_ci_low','excess_ci_high','gross_pnl','mean_net_transaction_costs','mean_fills']),
++ '', 'All dollars are mean per 1500-tick trial, not projected live-session dollars. Starting cash is a controlled $175,000 TOTAL per experiment, taken from configured trader 1, plus the exchange grant; the live configuration is $175,000/$175,000/$350,000 for trader 1/trader 2/broker. Thus this is not a $700,000 three-seat live-account replay, and the combined experiment splits a common $175,000 budget rather than duplicating live account allocations; all fees come from actual portfolio accounting. The study deliberately charges taker 30 bps (the earlier requested research setting), with maker rebate 10 bps where eligible. The repository’s bare default taker setting is 15 bps and can be overridden by venue/environment configuration; no claim is made that 30 bps is the universal hosted default. Week 9 cancellation fees included. Gross = net MTM P&L + actual net execution fees; carry is still deducted. This is an accounting decomposition, not a zero-fee counterfactual. Slippage vs decision mid is already inside P&L and is not subtracted twice.',
++ '', 'Pairwise differences use the same seeds; do not infer superiority merely from overlapping or non-overlapping marginal intervals.','',table(pairs,['week','left','right','seeds','mean_difference','ci_low','ci_high']),'', '## Risk and trading statistics','',
++ table(base,['week','strategy','session_sharpe','worst_drawdown_pct','profit_factor','closed_fill_win_rate_pct','mean_turnover','mean_fills','liquidations','position_violations','team_violations']),
++ '', 'Sharpe is session-scaled tick-return Sharpe, not annualized or an iid significance test. Profit factor pools positive/negative FIFO closing-fill P&L across independently matched accounts, including entry/exit fill commissions and rebates, and adds period cancellation/carry expenses to the loss denominator. This is an expense-adjusted closed-fill diagnostic, not a round-trip PF; the unallocated closed-fill PF is also exported. Non-fill expenses are not assigned arbitrarily to individual lots. The report uses overlay FIFO initialized at zero change from starting inventory: selling endowed shares opens a virtual short overlay, and buying them back closes it. This does not submit an actual stock short. It avoids assigning an arbitrary initial reference price to granted shares. Raw journals also preserve the earlier endowment-inclusive FIFO diagnostic, which is not used for this report’s profit factor. N/A means no losses or no closed fills, never an infinite profit claim. “Trades” here means fill messages; partial fills count separately. The exchange values the full position at the best bid/ask without a depth sweep, and own quotes can affect those marks. These are venue MTM results, not guaranteed exit cash. Net MTM includes open holdings; profit factor on closed fills cannot explain all MTM gains. Full fields, costs, slippage, closed counts and provenance counters are in `results/strategy_metrics.csv`.',
++ '', 'No-trade earns/loses on granted inventory, so a positive net account P&L alone is not alpha. Buy-and-hold invests 30% across four active equities, capped at 150 shares each; it is not a fully invested broad-market benchmark. Combined sleeves share total starting cash and conservative independent caps; it is a coordinated-capital experiment, not an atomic hedge execution service.',
++ '', '## Paired effect of correctness fixes','',table(effect_rows,['week','strategy','seeds','mean_pnl_change','min_pnl_change','max_pnl_change','ci_low','ci_high','mean_fill_change']),'','These differences compare corrected and original gateways on the SAME previously viewed seeds 1000–1049. They measure implementation effects, not new OOS alpha or a newly optimized strategy. A/B/C have exactly unchanged P&L on all 50 paired seeds; only basket changes, by about $0.006 per Week 9 run on average. Therefore the measured A/C gains should not be blamed on the gateway arrival check: their main external-validity concerns are population/fees/exposure. Fixes are retained for defensible order/risk semantics even where mean returns do not improve. The separate buffered-settlement fixture is not mixed into these serialized results.','', '## Stress results','',table([r for r in summary if r['regime']!='base'],['week','strategy','regime','seeds','excess_no_trade','excess_ci_low','excess_ci_high','mean_net_transaction_costs','liquidations']),
++ '', 'Fees_60bps doubles taker costs while leaving the real maker schedule unchanged. Latency_3ticks freezes requests for three ticks. Fast_quotes refreshes the synthetic provider each tick, exposing dependence on stale counterparty quotes. No_rebate explicitly removes maker rebates and reports this as a counterfactual, not the venue default. All retain actual matching/risk/order quotas. Spread/depth/TTL/informedness remain confounded in the base generator; `regime_conditions.csv` is descriptive, not a causal spread estimate. Fresh stress seeds are the same 50 IDs for paired comparison, not additional independent days.',
++ '', '## Event regime coverage','',table(event_conditions,['week','event_tick','symbol','direction','seeds','strategy','mean_excess']),'','Direction groups condition total trial P&L on one event sign; they do not isolate that event’s causal contribution because each trial contains other shocks. `event_manifest.csv` reconstructs deterministic resolved events from the isolated calendar RNG, validated against four full actual no-trade replays. Resolved directions are used only for this post-run audit and are never passed into the alpha strategies. There are 250 price events across the 50 fresh seeds and two scenarios.','', '## Supplied volatility stress (not independently rerun)','',table([r for r in supplied_stress if r['regime']=='volatile'],['week','strategy','seeds','mean_excess','ci_low','ci_high','net_fees']),'','This archived stress doubles the seed-specific volatility multiplier and magnifies scheduled shocks by 1.5. It is additional supplied evidence, not part of the new frozen 50-seed rerun. Fresh base regimes already span volatility multipliers 0.5, 1, 2 and 4; their conditional outcomes are exported in `volatility_regimes.csv`.','', '## Historical evidence','',table(hd,['file','strategy','net_pnl','excess_no_trade','commissions','slippage','fills','pnl_reproduction_delta']),
++ '', 'Replay uses real exchange order handling against reconstructed recorded ladders with funded providers, depth capped at 60 per level and 200 initial stock shares/provider. Historical recordings do not reveal queue identities, future order cancellations, latency or the counterfactual impact of our bot. Therefore market making is deliberately not scored on these tapes. Post-halt and basket inactivity is not successful alpha; futures were unavailable and usable halt/reversal opportunities absent. All three event-momentum days underperform no-trade, even after adding commissions back, so simply reducing fees does not establish historical profitability.',
++ '', '## Supplied strategy ablations (not independently rerun)','',table([{'week':r['week'],'variant':r['candidate'],'seeds':r['n_seeds'],'excess_no_trade':r['mean_excess_no_trade'],'net_fees':r['mean_net_fees'],'fills':r['mean_fills']} for r in json.loads((ARCHIVE/'alpha_results/study/ablation_summary.json').read_text())],['week','variant','seeds','excess_no_trade','net_fees','fills']),'','Removing the fee gate changes Week 5 excess by only about $1, and removing trailing costs about $5 on the supplied seeds. Those small deltas do not validate an optimal exit rule. Removing reversal confirmation worsens B from about -$2 to -$36 while increasing fills: extra activity is not extra alpha. Microprice and inventory-skew deltas are small relative to seed dispersion; no independent significance claim is made. Removing the adverse filter increases rebates/turnover, so its higher raw P&L cannot be read as better information prediction.','', '## Code audit: severity and exact functions','','20 findings: 8 High, 11 Medium, 1 Low. These include demonstrated original-venue defects, measurement limitations and external-validity concerns; they are not all claims of realized P&L distortion.']
++ for severity,file,func,line,finding,resolution in ISSUES:
++  lines+= [f'### {severity}: `{file}:{line}` — `{func}`','',finding+' '+resolution,'']
++ lines += ['## Signal-to-accounting trace and verified mechanics','',
++ 'Strategies observe public events and current visible book, decide, then append the current quote to lagged history. Momentum uses post-event observed prices; halt references are captured from strictly lagged pre-halt history; basket regression uses past returns. No direct future price-array access was found. The current book is observed at tick t; non-contingent orders arrive no earlier than t+1, so they do not fill on their signal-generating observation by construction. Equity strategies are long-only, making negative signals reductions of endowed inventory rather than symmetric stock-short alpha. The original strategy’s calendar percentage describes a future ramp, but it is deliberately public in this simulator; this is simulator-specific privileged predictability, not an undisclosed historical future-price lookup.',
++ '', 'Gateway reserves pending exposure before scheduling. The corrected non-contingent payload stays fixed during transport. The actual exchange handler validates and matches price-time priority at resting prices, emits ACK then fills, processes partial fills, IOC expiry and post-only rejection. Cancellation uses actual matching-engine state in this serialized adapter; it does not simulate asynchronous live cancellation uncertainty. Portfolio cash, positions, commissions, rebates, cancellation fees, carry and futures variation margin come from exchange objects. Snapshot/ACK delivery is immediate and reconnect/order recovery is not modeled here.',
++ '', 'Week 5 team position limit is ±800 shares per symbol and liquidation threshold is 50% of starting capital. Research caps are at most 150 shares/sleeve, smaller for MM and split combinations; futures cap 20. Entry cash reserve is 60%, gross cap min(40% cash, $70,000), entry equity floor 70%. A 1500-tick window also does not cover the entire scheduled graded hour. These are submission-time constraints, not guarantees against unlimited adverse price moves or exchange faults. A separate verified Week 9 MOC reservation defect allows three 500-share held orders to finish at 1500 shares under a 1000-share cap; this remains unfixed and is not exercised by these strategies. The original venue also has a reproduced matching-before-ACK settlement race: two independent 500-share buys can exceed the team limit. The separate buffered-settlement fixture fixes that isolated order-admission interleaving, but was not silently substituted into the frozen serialized performance runs. Do not treat exchange position rejections as a complete concurrency safety net. The fixed-wire correction may deliver requests during a halt that began after submission; the real exchange must reject them. No strategy knowingly generates new orders for an observed halted symbol.',
++ '', 'ARENA10 is an arithmetic price-level average of ten symbols (AAPL, MSFT, NVDA, TSLA, AMZN, GOOGL, META, NFLX, AMD, INTC), not a tradable equity basket in Week 5. Futures are enabled in Week 9, with margin $40/contract and periodic variation settlement. Basket orders have no atomic multileg facility. Opening auctions run; these strategies wait for continuous trading. No real closing auction is simulated at the horizon. The experiments use one isolated venue despite the scenario enabling multi-venue trading; competing venue books/routing are absent. Only four equities plus eligible ARENA10 receive research population liquidity, so universe coverage is narrow and there is no survivorship-free empirical sample.',
++ '', 'The archived `max_gross` field is a maximum individual sleeve exposure, not the simultaneous portfolio aggregate. It remains mislabeled in original outputs and must not be used as a team-wide maximum. Position violation counters sampled at boundaries plus zero liquidations are useful observed diagnostics, not formal every-fill proofs. The corrected zero-crossing risk bug has a regression test; full reconnect/duplicate/out-of-order wire and hedge repair guarantees remain outside this serialized backtest.',
++ '', '## Parameter sensitivity and ablations','',
++ 'The sensitivity figure and archived sensitivity CSV contain all 50 parameter settings on only 12 calibration seeds. A is profitable in calibration at confirmation 3/5 but negative at 10/15; holding/trailing changes are much smaller. This fits the simulator’s 15-tick ramp mechanism. C’s width=1 settings are positive while wider quotes are negative, exposing quote/population sensitivity. B’s z-threshold grid gives identical weak results, so its selected threshold is not evidence of a meaningful optimum. All eight D settings lose; higher thresholds mainly reduce activity. A confirmation=3, hold=120, trailing=2; B z=2.5; C width=1, skew=1.5; D z=3.5/lookback=60 were frozen for this audit. The archive’s 550 ablation runs remove fee gate/trailing, reversal/earnings filtering, microprice/adverse/inventory skew and beta/hedging. They are supplied evidence, not independently reexecuted in this audit. Rebate removal and fast refresh here are newly executed mechanism ablations. No claimed profitable improvement is inferred merely from an in-sample parameter maximum. Many comparisons make unadjusted bootstrap confidence intervals exploratory.',
++ '', '## Improvement roadmap (ranked; no untested profit promise)','',
++ '1. **Repair execution and risk truth first** (implemented separately, moderate complexity): `CorrectedGateway` removes arrival-time resizing, clips reductions, and resets hedge counters. This prevents false safety/profit inference; the fresh evaluation measures resulting performance, not a claim that correctness improves P&L.',
++ '2. **Replace synthetic counterparty assumptions with recorded event/queue evidence** (high complexity, highest research value): extend `MarketPopulation`, receiver journals and historical schema to record order IDs, queue position, arrivals/cancels and fill markouts. Fast-refresh and rebate-off tests measure two dependencies; until queue data exist, market-making alpha remains conditional.',
++ '3. **Make event exits fill-aware and classify continuation/reversal** (moderate complexity, untested profitability): pass actual fills into `PositionStrategy.manage`, use execution VWAP/time and trailing volatility; estimate continuation only from observations after the event, with embargoed day-level validation. Historical A losses make this more urgent than adding more parameter combinations.',
++ '4. **Require executable basket edge and fail-safe hedge repair** (high complexity, no demonstrated alpha): in `Basket.decide` include both touch spreads, rounded leg weights, costs, current depth, beta uncertainty and a stationarity diagnostic; in the gateway pre-reserve both legs and enforce a bounded repair/unwind state machine. Keep it disabled while expected net residual convergence cannot pay both legs.',
++ '5. **Allocate by paired net evidence and run nested chronological validation** (moderate/high complexity, untested live profitability): replace calibration best-setting selection with sparse allocations, confidence bounds and drawdown budgets; cross-validate by complete event/day and independently randomize regime dimensions. Include original, endowed no-trade, terminally matched buy-and-hold, neutral MM and no-rebate baselines. Do not optimize on seeds 3000–3049 after this audit.',
++ '', '## Visualizations','',
++ '![Preselected seed equity and drawdown](figures/equity_drawdown.png)','',
++ '![Seed-level incremental net P&L distribution](figures/seed_distribution.png)','',
++ '![Gross versus net cost decomposition](figures/cost_decomposition.png)','',
++ '![Calibration parameter sensitivity](figures/calibration_sensitivity.png)','',
++ '![Fresh held-out execution and cost stresses](figures/stress_sensitivity.png)','',
++ '## Reproduction commands','',
++ 'Run from the repository root, Python 3.10; matplotlib/numpy available in `.venv310` for report generation. No hosted exchange commands are used.',
++ '', '```bash\npython3 audit_review/code/verify_sources.py\npython3 audit_review/code/run_archive_tests.py\npython3 audit_review/code/run_root_tests.py\npython3 -m pytest audit_review/code/test_audit.py audit_review/code/test_exchange_concurrency.py audit_review/code/test_fifo.py -q\npython3 audit_review/code/audit_study.py --stage reproduce --workers 8\npython3 audit_review/code/audit_study.py --stage fresh --workers 8\npython3 audit_review/code/audit_study.py --stage stress --workers 8\npython3 audit_review/code/reproduce_history.py\npython3 audit_review/code/paired_corrections.py\npython3 audit_review/code/event_coverage.py\n.venv310/bin/python audit_review/code/build_report.py\n```',
++ '', 'Each study command overwrites its own stage output; preserve existing results before changing definitions. Protocol JSON records exact seeds/settings/code hash. `reproduce_history.py` requires the external checksum-matched `sessions/` files. Main raw output is JSONL with every equity path and fill journal; tables, reproduction deltas and XML are under `results/`. Figures: equity/drawdown, seed distributions, cost decomposition, calibration sensitivity, and stress sensitivity. Original source/bot versions are preserved for comparison. `effective_configuration.json` records a sanitized whitelist of effective fees and risk parameters; `source_verification.json` checks all 39 archived source fingerprints. Raw JSONL journals and extracted inputs are intentionally ignored by Git but remain saved locally.',
++ '', '## Evidence limits','',
++ 'There is no guarantee of full marks, positive live profit or universal risk safety. Synthetic independent seeds are repetitions of one designed venue population, not independent historical market days. Positive bootstrap intervals do not remove structural model error or multiple-testing concerns. No strategy is established as convincing after-cost historical alpha by the available evidence. The original bot remains Week-5-gated on Weeks 2–4 too, so there is no meaningful active-original historical comparison on the supplied earlier-week tapes.']
++ (OUT/'REPORT.md').write_text('\n'.join(lines)+'\n')
++ print(json.dumps(verification,indent=2));print('Fresh ranking:')
++ for r in base:print(r['week'],r['strategy'],round(r['excess_no_trade'],2),round(r['net_pnl'],2))
++if __name__=='__main__':main()
+diff --git a/audit_review/code/event_coverage.py b/audit_review/code/event_coverage.py
+new file mode 100644
+index 0000000..c0aec06
+--- /dev/null
++++ b/audit_review/code/event_coverage.py
+@@ -0,0 +1,43 @@
++"""Audit event regime coverage; future resolved directions never go to alphas."""
++import asyncio,json,csv
++from pathlib import Path
++from statistics import mean
++from audit_study import runner,ROOT
++from alpha_lab.exchange import OfflineExchange
++
++def reconstruct(seed,week):
++    with runner.isolated(seed,week,175000.,1) as (_,scenario,_):
++        server=OfflineExchange();server.set_scenario(scenario)
++        return [dict(seed=seed,week=week,tick=e.tick,kind=e.kind,symbol=e.symbol or '*',pct=e.resolve()) for e in server.calendar.events if e.kind!='dividend']
++
++def main():
++    original=runner.summarize
++    def capture(server,*args):
++        r=original(server,*args);r['resolved_events']=[dict(tick=e.tick,pct=e.resolved_pct) for e in server.calendar.events if e.kind!='dividend'];return r
++    runner.summarize=capture
++    checked=[]
++    for week in [5,9]:
++        for seed in [3000,3001]:
++            expected=reconstruct(seed,week)
++            r=asyncio.run(runner.run_one(seed,[('no_trade',{})],week=week,ticks=1500))
++            assert r['resolved_events']==[dict(tick=e['tick'],pct=e['pct']) for e in expected]
++            checked.append(dict(week=week,seed=seed,match=True))
++    events=[e for week in [5,9] for seed in range(3000,3050) for e in reconstruct(seed,week)]
++    out=ROOT/'audit_review/results'
++    with (out/'event_manifest.csv').open('w',newline='') as f:
++        w=csv.DictWriter(f,fieldnames=list(events[0]));w.writeheader();w.writerows(events)
++    (out/'event_manifest_validation.json').write_text(json.dumps({'validation_actual_replays':checked,'method':'Chronological CalendarEvent.resolve draws under isolated seeded RNG; source inspection finds no other active global-RNG consumers. Validated against actual full no-trade simulations; audit analysis only, not signal input.'},indent=2))
++    rows=[json.loads(x) for x in (out/'fresh.jsonl').open()];baseline={(r['week'],r['seed']):r['pnl'] for r in rows if r['candidate']=='no_trade'}
++    conditions=[]
++    for week in [5,9]:
++        for tick in sorted(set(e['tick'] for e in events if e['week']==week)):
++            for direction in ['up','down']:
++                selected=[e for e in events if e['week']==week and e['tick']==tick and (e['pct']>0)==(direction=='up')]
++                seeds={e['seed'] for e in selected}
++                for name in ['event_momentum','market_making','post_halt','basket','combined_profit','original']:
++                    sample=[r for r in rows if r['week']==week and r['candidate']==name and r['seed'] in seeds]
++                    conditions.append(dict(week=week,event_tick=tick,symbol=selected[0]['symbol'],direction=direction,seeds=len(seeds),mean_abs_shock=mean(abs(e['pct']) for e in selected),strategy=name,mean_excess=mean(r['pnl']-baseline[(week,r['seed'])] for r in sample)))
++    with (out/'event_direction_conditions.csv').open('w',newline='') as f:
++        w=csv.DictWriter(f,fieldnames=list(conditions[0]));w.writeheader();w.writerows(conditions)
++    print('Validated 4 actual no-trade replays; reconstructed',len(events),'resolved price events.',flush=True)
++if __name__=='__main__':main()
+diff --git a/audit_review/code/extract_archive.py b/audit_review/code/extract_archive.py
+new file mode 100644
+index 0000000..0bd8511
+--- /dev/null
++++ b/audit_review/code/extract_archive.py
+@@ -0,0 +1,17 @@
++"""Extract audit inputs without overwriting an existing baseline."""
++import argparse,zipfile,hashlib,json
++from pathlib import Path
++p=argparse.ArgumentParser();p.add_argument('--archive',type=Path,default=Path('../alpha_review_light.zip'));p.add_argument('--output',type=Path,default=Path('audit_review/extracted'));a=p.parse_args()
++if a.output.exists():raise SystemExit('Output already exists; use another --output to preserve baseline')
++digest=hashlib.sha256(a.archive.read_bytes()).hexdigest()
++if digest!='1fe1d222c67447ace8f14ba5bcc2a9a8e1ce91e3b0303a5d344ba84f23f7cf76':raise SystemExit('Archive checksum differs from the audited input')
++root=a.output.resolve()
++with zipfile.ZipFile(a.archive) as z:
++ for member in z.infolist():
++  target=(root/member.filename).resolve()
++  if root not in target.parents and target!=root:raise ValueError('Unsafe archive path')
++  if (member.external_attr>>16)&0o170000==0o120000:raise ValueError('Archive symlink is not supported')
++ members=[dict(path=m.filename,bytes=m.file_size) for m in z.infolist()]
++ z.extractall(root)
++(root.parent/'archive_manifest.json').write_text(json.dumps(dict(archive=str(a.archive),sha256=digest,files=members),indent=2))
++print('Archive SHA256:',hashlib.sha256(a.archive.read_bytes()).hexdigest())
+diff --git a/audit_review/code/fifo.py b/audit_review/code/fifo.py
+new file mode 100644
+index 0000000..dd6ec83
+--- /dev/null
++++ b/audit_review/code/fifo.py
+@@ -0,0 +1,21 @@
++"""Per-account overlay FIFO: start at zero change from endowed inventory.
++
++A sale of starting stock opens a virtual short OVERLAY, not a legal stock
++short. A later buyback closes that overlay. Avoids assigning arbitrary initial
++reference prices to grants when measuring trading round trips.
++"""
++from collections import defaultdict,deque
++
++def overlay_fifo(fills):
++    lots=defaultdict(deque);closed=[]
++    for f in fills:
++        key=(f['account'],f['symbol']);q=f['quantity'];signed=q*(1 if f['side']=='buy' else -1)
++        cost=(f['fee']-f['rebate'])/q;pnl=0.;matched=False
++        while signed and lots[key] and signed*lots[key][0][0]<0:
++            old=lots[key][0];direction=1 if old[0]>0 else -1;n=min(abs(signed),abs(old[0]))
++            pnl+=n*((f['price']-old[1])*direction-old[2]-cost)
++            old[0]-=n*direction;signed+=n*direction;matched=True
++            if not old[0]:lots[key].popleft()
++        if signed:lots[key].append([signed,f['price'],cost])
++        if matched:closed.append(pnl)
++    return dict(gains=sum(x for x in closed if x>0),losses=-sum(x for x in closed if x<0),count=len(closed),wins=sum(x>0 for x in closed))
+diff --git a/audit_review/code/findings.py b/audit_review/code/findings.py
+new file mode 100644
+index 0000000..de21ee5
+--- /dev/null
++++ b/audit_review/code/findings.py
+@@ -0,0 +1,23 @@
++"""Reviewed code findings, severities refer to research validity or risk impact."""
++ISSUES=[
++('Medium','alpha_lab/baselines.py','Original.observe_async',39,'The original strategy and outbound risk method execute, but the adapter gives direct portfolio snapshots each tick, clears inflight when gateway pending is empty, and does not feed regular leaderboards that advance _venue_tick. Its live wire/clock/recovery behavior is not reproduced.','Preserve this adapter for exact reproduction and label it an adapted original-policy baseline, not an end-to-end production-bot backtest. Correct clocks/ACK delivery and matched terminal rules before an equal-risk strategy comparison.'),
++('Medium','engine/exchange/server.py','Portfolio.net_worth / ExchangeServer._bidask_marks',284,'The venue marks an entire long/short inventory at best bid/ask without sweeping available depth; a tiny own quote can influence valuation. Positive MTM is not necessarily realizable liquidation P&L, especially with halted residual inventory. This matches venue accounting, not an implementation fee error.','Report MTM explicitly, preserve open-overlay diagnostics and require depth-aware terminal liquidation/cash realization in a future matched-terminal study.'),
++('High','engine/exchange/server.py','ExchangeServer._handle_place_order / close_session',1146,'Held MOC orders are absent from book.open_quantity risk reservations; close_session injects them directly into the closing book without a new admission check. Verified Week 9 case: three individually valid 500-share MOC buys produce 1500 shares under a 1000-share team cap.','Unfixed in original and buffered-settlement fixture; no audited alpha uses MOC and performance runs do not close the session. Must reserve held MOC exposure/cash and revalidate auction eligibility before using this order type.'),
++('High','engine/exchange/server.py','ExchangeServer._handle_place_order',1226,'Matching removes liquidity before awaited ACK delivery, while portfolio settlement follows ACK. Concurrent seats can both validate against old team positions. Actual-handler regression produces 1000 shares from two 500-share buys under the Week 5 800-share team cap. Serialized backtests cannot reveal this race.','Separate BufferedSettlementExchange serializes order mutation and buffers outbound delivery until settlement completes; regression rejects the second order. Full production tick/auction/transport coordination remains outside this fixture.'),
++('High','alpha_lab/risk.py','Gateway.allowed_quantity',45,'A reducing flag depends only on initial sign; futures orders can cross flat and bypass the equity, cash and gross entry tests. Regression: short 1, buy 21 with zero cash allowed.','CorrectedGateway clips reducing requests to flat; dedicated regression.'),
++('High','alpha_lab/risk.py','Gateway.execute_due',103,'Rechecks server prices/cash/halt after transport delay and silently changes or discards the already-submitted payload. This is arrival-time privileged control, not ordinary exchange rejection.','CorrectedGateway freezes non-contingent order payload; actual exchange decides arrival acceptance.'),
++('High','alpha_lab/risk.py','Gateway.execute_due',119,'Cumulative group fills are reused across exit retries; minimum hedge of 1 can overhedge fractional first-leg fills. Failure of second-leg admission can leave an unhedged first leg.','Fresh attempt IDs and round-to-zero implemented. Atomicity and bounded unwind remain unresolved.'),
++('High','alpha_lab/runner.py','MarketPopulation.refresh / flow',105,'Synthetic liquidity anchors to the venue reference, with fixed TTL/depth and exogenous buy flow insensitive to actual fees. Our due orders always precede external flow. Matching is real but profitable counterparties are artificial.','Fast quote refresh and no rebate stress tested separately; historical queue claims remain unsupported.'),
++('High','alpha_lab/runner.py','run_one',232,'Last 12 ticks replace strategies, including the original, with an imposed unwind, while buy-and-hold is left marked. No actual closing auction. Exit/terminal costs are not identical between baselines.','Preserved for reproducibility; disclose results as MTM under this terminal convention.'),
++('High','alpha_lab/baselines.py','Original.observe_async',45,'Week gate explicitly disables original in Week 9. It cannot be presented as an active Week 9 baseline. Original also uses different position sizing and public event shape data.','Label inactive Week 9 and avoid equal-risk/feature claims.'),
++('Medium','alpha_lab/metrics.py','summarize',7,'Execution net_fees excludes cancellation fees; unadjusted exports understate costs in Week 9. Archived fee_audit later repairs saved total_net_fees, so distinguish raw function from amended reports.','Independent metrics read actual portfolio fees less rebates, include cancellation debits.'),
++('Medium','alpha_lab/metrics.py','summarize',22,'FIFO combines all sleeves before matching, allowing trades in different accounts to close each other. Win rate has no profit factor and omits cancellation/carry expense.','Independent per-account overlay FIFO avoids cross-seat closes and arbitrary grant reference basis. The report also expenses period cancellation/carry in the profit-factor loss denominator; costs remain separately visible.'),
++('Medium','alpha_lab/metrics.py','summarize',45,'max_gross is maximum sleeve exposure rather than simultaneous portfolio total. Per-tick boundary safety counters do not establish every-fill safety.','Retain field as sleeve maximum; aggregate exposure measurement remains an explicit limitation.'),
++('Medium','alpha_lab/metrics.py','summarize',51,'Same-tick counter excludes fills missing decision provenance. Zero is not evidence that every fill had valid provenance.','Independent missing_fill_provenance counter exported.'),
++('Medium','team/alpha/core.py','PositionStrategy.manage',145,'Stops and holding duration initialize from first observed inventory change and observed midpoint, not actual weighted execution prices/times. Delayed/partial fills change realized stop risk.','Needs fill-aware plan state before live deployment; not silently changed during frozen test.'),
++('Medium','team/alpha/basket.py','Basket.decide',36,'Beta is constrained positive without stationarity checks; log price residual z-score need not be mean reverting. Cost gate omits actual futures spread and integer hedge error.','Keep experimental; no profitable claim. Disable until net edge and hedge repairs demonstrated.'),
++('Medium','team/alpha/market_making.py','AdaptiveMarketMaker.decide',32,'Inventory skew targets half cap, so long exposure and spread/rebate earnings are mixed. Adverse-selection filter is a volatility/trend proxy, not a conditional fill-markout estimate.','Compare with no-trade and rebate-off stress; true neutral sizing requires borrow/short policy changes.'),
++('Medium','alpha_lab/runner.py','MarketPopulation.__init__',108,'Spread, depth, TTL and informedness all depend on seed modulo 3, so their marginal effects are confounded. Seed replication alone cannot identify spread sensitivity.','Separate TTL intervention provided; independent factorial regime randomization remains future work.'),
++('Medium','alpha_lab/experiment.py','select / run_batch',87,'Only 12 calibration seeds across 50 settings and many comparisons; bootstrap intervals condition on generator and ignore selection/multiple testing. Previously viewed OOS seeds cannot be reused as fresh evidence.','Frozen parameters tested on seeds 3000-3049; no new optimization or positive live-alpha conclusion.'),
++('Low','alpha_lab/metrics.py','summarize',15,'Session Sharpe scales by sqrt(number of ticks); it is not annualized and serial returns make standard iid inference unreliable. Fill win rate is not round-trip trade win rate.','Explicit metric labels and paired seed-level inference in audit report.'),
++]
+diff --git a/audit_review/code/make_patch.py b/audit_review/code/make_patch.py
+new file mode 100644
+index 0000000..41d8b55
+--- /dev/null
++++ b/audit_review/code/make_patch.py
+@@ -0,0 +1,16 @@
++"""Create a review patch containing only this audit's source/report additions."""
++from pathlib import Path
++import subprocess,tempfile,json
++ROOT=Path(__file__).resolve().parents[2];folder=ROOT/'audit_review'
++files=[folder/'conftest.py',folder/'.gitignore',folder/'FILES.md',folder/'REPORT.md',folder/'issues.json']+sorted((folder/'code').glob('*.py'))
++chunks=[]
++for file in files:
++ r=subprocess.run(['git','diff','--no-index','--','/dev/null',str(file.relative_to(ROOT))],cwd=ROOT,capture_output=True,text=True)
++ if r.returncode not in (0,1):raise RuntimeError(r.stderr)
++ chunks.append(r.stdout)
++patch=folder/'changes.patch';patch.write_text(''.join(chunks))
++with tempfile.TemporaryDirectory(prefix='alpha_audit_patch_') as tmp:
++ r=subprocess.run(['git','apply','--check','--whitespace=error',str(patch)],cwd=tmp,capture_output=True,text=True)
++ if r.returncode:raise RuntimeError(r.stderr)
++(folder/'results/patch_validation.json').write_text(json.dumps(dict(files=[str(f.relative_to(ROOT)) for f in files],patch_bytes=patch.stat().st_size,git_apply_check_exit_code=r.returncode),indent=2))
++print(len(files),'files;',patch.stat().st_size,'bytes; git apply --check passed')
+diff --git a/audit_review/code/network_guard.py b/audit_review/code/network_guard.py
+new file mode 100644
+index 0000000..c1b67be
+--- /dev/null
++++ b/audit_review/code/network_guard.py
+@@ -0,0 +1,25 @@
++"""Allow local test fixtures, forbid hosted/network exchange connections."""
++import ipaddress
++import os
++import socket
++
++
++def install():
++    os.environ['ARENA_TOKEN']='offline-audit'
++    os.environ['RUN_LIVE_SMOKE']=''
++    original=socket.socket.connect
++    original_ex=socket.socket.connect_ex
++    def allowed(address):
++        if isinstance(address,str):return True  # local AF_UNIX
++        host=address[0]
++        if host=='localhost':return True
++        try:return ipaddress.ip_address(host).is_loopback
++        except ValueError:return False
++    def connect(self,address):
++        if not allowed(address):raise RuntimeError('Offline audit blocked a non-loopback connection')
++        return original(self,address)
++    def connect_ex(self,address):
++        if not allowed(address):raise RuntimeError('Offline audit blocked a non-loopback connection')
++        return original_ex(self,address)
++    socket.socket.connect=connect
++    socket.socket.connect_ex=connect_ex
+diff --git a/audit_review/code/paired_corrections.py b/audit_review/code/paired_corrections.py
+new file mode 100644
+index 0000000..84a624f
+--- /dev/null
++++ b/audit_review/code/paired_corrections.py
+@@ -0,0 +1,15 @@
++"""Paired correctness comparison on previously viewed seeds; NOT fresh OOS."""
++import json,time,hashlib
++from pathlib import Path
++from concurrent.futures import ProcessPoolExecutor,as_completed
++from audit_study import job,ROOT
++if __name__=='__main__':
++    out=ROOT/'audit_review/results';names=['event_momentum','post_halt','market_making','basket','no_trade']
++    protocol={'seeds':list(range(1000,1050)),'weeks':[5,9],'names':names,'mode':'corrected','stress':'base','ticks':1500,'purpose':'paired correction effect on previously seen reproduction seeds; not independent OOS','study_code_sha256':hashlib.sha256((ROOT/'audit_review/code/audit_study.py').read_bytes()).hexdigest()}
++    (out/'paired_corrections_protocol.json').write_text(json.dumps(protocol,indent=2));t=time.monotonic()
++    with (out/'paired_corrections.jsonl').open('w') as f,ProcessPoolExecutor(max_workers=8) as pool:
++        fs=[pool.submit(job,(seed,week,'corrected','base',names)) for week in [5,9] for seed in range(1000,1050)]
++        for i,future in enumerate(as_completed(fs),1):
++            for r in future.result():f.write(json.dumps(r,allow_nan=False)+'\n')
++            f.flush()
++            if i%10==0:print(i,'/100 seed/week jobs;',i*5,'trials;',round(time.monotonic()-t),'seconds',flush=True)
+diff --git a/audit_review/code/reproduce_history.py b/audit_review/code/reproduce_history.py
+new file mode 100644
+index 0000000..36a8756
+--- /dev/null
++++ b/audit_review/code/reproduce_history.py
+@@ -0,0 +1,20 @@
++import sys,json,asyncio
++from pathlib import Path
++from concurrent.futures import ProcessPoolExecutor,as_completed
++ROOT=Path(__file__).resolve().parents[2];ARCHIVE=ROOT/'audit_review/extracted/2026Autumn-6-fresh'
++sys.path.insert(0,str(ARCHIVE))
++from network_guard import install
++install()
++import arena
++from scripts.alpha_history import run_repaired
++PARAMS={'event_momentum':{'confirmation':3,'holding':120,'trailing':2.},'post_halt':{'z':2.5},'basket':{'z':3.5,'lookback':60}}
++def job(x):
++ p,n=x
++ return asyncio.run(run_repaired(p,n,PARAMS.get(n,{}),175000.))
++if __name__=='__main__':
++ inputs=json.loads((ROOT/'audit_review/results/historical_inputs.json').read_text());assert all(x['matches'] for x in inputs)
++ rows=[]
++ with ProcessPoolExecutor(max_workers=3) as pool:
++  for f in as_completed([pool.submit(job,(x['file'],n)) for x in inputs for n in [*PARAMS,'buy_hold','no_trade']]):
++   r=f.result();rows.append(r);print(r['strategy'],Path(r['file']).name,round(r['pnl'],3),flush=True)
++   (ROOT/'audit_review/results/historical_reproduced.json').write_text(json.dumps(rows,indent=2))
+diff --git a/audit_review/code/run_archive_tests.py b/audit_review/code/run_archive_tests.py
+new file mode 100644
+index 0000000..6beaa40
+--- /dev/null
++++ b/audit_review/code/run_archive_tests.py
+@@ -0,0 +1,10 @@
++from pathlib import Path
++import os
++import sys
++from network_guard import install
++install()
++(Path(__file__).resolve().parents[1]/'results').mkdir(parents=True,exist_ok=True)
++root=Path(__file__).resolve().parents[1]/'extracted/2026Autumn-6-fresh'
++sys.path.insert(0,str(root));os.chdir(root)
++import pytest
++raise SystemExit(pytest.main(['tests','-q','--junitxml='+str(Path(__file__).resolve().parents[1]/'results/archive_tests.xml')]))
+diff --git a/audit_review/code/run_root_tests.py b/audit_review/code/run_root_tests.py
+new file mode 100644
+index 0000000..fc1d07e
+--- /dev/null
++++ b/audit_review/code/run_root_tests.py
+@@ -0,0 +1,9 @@
++"""Verify the existing repository suite without collecting extracted copies."""
++from pathlib import Path
++import sys,os
++from network_guard import install
++install()
++root=Path(__file__).resolve().parents[2]
++sys.path.insert(0,str(root));os.chdir(root)
++import pytest
++raise SystemExit(pytest.main(['-q','--junitxml='+str(root/'audit_review/results/root_tests.xml')]))
+diff --git a/audit_review/code/test_audit.py b/audit_review/code/test_audit.py
+new file mode 100644
+index 0000000..9e21d19
+--- /dev/null
++++ b/audit_review/code/test_audit.py
+@@ -0,0 +1,85 @@
++from types import SimpleNamespace as NS
++from collections import defaultdict
++import asyncio
++from audit_study import CorrectedGateway,BASE_GATEWAY
++from alpha_lab.exchange import Receiver,Reservation
++from team.alpha.core import Intent,Observation,Quote
++
++class Portfolio:
++    liquidated=False;cash=0.;positions={'ARENA10':-1}
++    def net_worth(self,*a):return 1000.
++class Server:
++    session_open=True;tick=1;ref_prices={'ARENA10':100.,'AAPL':100.}
++    scenario=NS(flag=lambda x:True)
++    circuit_breaker=NS(is_halted=lambda s:False)
++    def __init__(self):
++        self.portfolios={'x':Portfolio()};self.books={'ARENA10':NS(_orders={})};self.sent=[]
++    def _bidask_marks(self):return {}
++    async def _handle_place_order(self,*args):self.sent.append(args[1])
++
++def test_original_reducing_flip_reproduced_and_fixed():
++    s=Server();rx=Receiver('x');intent=Intent('ARENA10','buy',21,100.)
++    assert BASE_GATEWAY(s,'x',rx,175000.).allowed_quantity(intent)==21
++    assert CorrectedGateway(s,'x',rx,175000.).allowed_quantity(intent)==1
++
++def test_wire_quantity_not_resized_at_arrival():
++    s=Server();rx=Receiver('x');g=CorrectedGateway(s,'x',rx,175000.)
++    e=Reservation('ARENA10','buy',4,100.,'ioc',decision_tick=0,due=1)
++    rx.pending[('ARENA10','buy')]=e;g.queue=[(1,1,'place',e)]
++    # Arrival safety state says zero. Already-sent wire remains 4; actual engine
++    # is responsible for accepting/rejecting it rather than silently dropping.
++    g.allowed_quantity=lambda *a,**k:0
++    asyncio.run(g.execute_due(1));assert s.sent[0].quantity==4
++
++def test_new_orders_still_blocked_on_observed_halt():
++    s=Server();s.circuit_breaker=NS(is_halted=lambda sym:True)
++    assert CorrectedGateway(s,'x',Receiver('x'),175000.).allowed_quantity(Intent('ARENA10','buy',1,100.))==0
++
++def test_partial_hedge_rounds_zero_not_forced_one():
++    s=Server();rx=Receiver('x');g=CorrectedGateway(s,'x',rx,175000.)
++    e=Reservation('ARENA10','sell',1,100.,'ioc',group='g',due=1)
++    rx.pending[('ARENA10','sell')]=e;g.queue=[(1,1,'place',e)]
++    g.group_orders['g']='AAPL';g.group_first_requested['g']=10;rx.group_fills[('g','AAPL')]=1
++    asyncio.run(g.execute_due(1));assert not s.sent;assert g.hedge_failures==1
++
++def test_reused_group_gets_new_attempt_identifier():
++    s=Server();g=CorrectedGateway(s,'x',Receiver('x'),175000.);captured=[]
++    original=BASE_GATEWAY.schedule
++    try:
++        BASE_GATEWAY.schedule=lambda self,items,obs:captured.extend(items)
++        for tick in [1,2]:g.schedule([Intent('AAPL','buy',1,100.,group='exit')],NS(tick=tick))
++    finally:BASE_GATEWAY.schedule=original
++    assert captured[0].group!=captured[1].group
++
++def metric_fixture():
++    def fill(side,price):
++        return dict(tick=1,symbol='AAPL',side=side,quantity=1,price=price,fee=0.,rebate=0.,maker=False,decision_tick=0,decision_mid=10.,group='')
++    rx1=Receiver('a');rx2=Receiver('b');rx1.fills=[fill('buy',10.)];rx2.fills=[fill('sell',12.)]
++    def p(q):return NS(positions={'AAPL':q},liquidated=False,total_fees_paid=0.,total_rebates_earned=0.,total_carry_paid=0.)
++    s=NS(portfolios={'a':p(1),'b':p(-1)})
++    g=NS(position_violations=0,peak_position=1,peak_gross=12.,hedge_failures=0)
++    return s,[rx1,rx2],[g,g]
++
++def test_fifo_does_not_close_across_accounts():
++    from audit_study import summarize,BASE_SUMMARY
++    s,rx,gs=metric_fixture()
++    args=(s,['a','b'],rx,gs,[100.],100.,{}, {'AAPL':10.})
++    assert BASE_SUMMARY(*args)['closed_fill_count']==1
++    assert summarize(*args)['fifo_closed_fills']==0
++
++def test_fee_accounting_includes_cancellation_and_rebate():
++    from audit_study import summarize
++    s,rx,gs=metric_fixture()
++    s.portfolios['a'].total_fees_paid=1.5;s.portfolios['a'].total_rebates_earned=.1
++    rx[0].fills[0].update(fee=1.,rebate=.1)
++    r=summarize(s,['a','b'],rx,gs,[98.],100.,{}, {'AAPL':10.})
++    assert abs(r['total_net_fees']-1.4)<1e-12
++    assert abs(r['cancellation_fees_paid']-.5)<1e-12
++    assert abs(r['gross_pnl_before_execution_fees']-(-.6))<1e-12
++
++def test_missing_fill_provenance_is_counted():
++    from audit_study import summarize
++    s,rx,gs=metric_fixture();rx[0].fills[0]['decision_tick']=None
++    r=summarize(s,['a','b'],rx,gs,[100.],100.,{}, {'AAPL':10.})
++    assert r['missing_fill_provenance']==1
++    assert r['same_tick_fills']==0  # Shows why zero alone is inadequate.
+diff --git a/audit_review/code/test_exchange_concurrency.py b/audit_review/code/test_exchange_concurrency.py
+new file mode 100644
+index 0000000..5b54c3c
+--- /dev/null
++++ b/audit_review/code/test_exchange_concurrency.py
+@@ -0,0 +1,68 @@
++"""Expose matching-before-ACK settlement race using actual exchange handlers."""
++import asyncio
++import sys
++from pathlib import Path
++sys.path.insert(0,str(Path(__file__).resolve().parent))
++from audit_study import runner,cfg
++from alpha_lab.exchange import OfflineExchange
++from exchange.server import Portfolio
++from shared.messages import PlaceOrder,OrderAck,ErrorMsg
++
++def run_race(exchange_class):
++    async def scenario():
++        with runner.isolated(71,5,175000.,1) as (_,scenario,accounts):
++            cfg.LEVERAGE_ENABLED=False
++            s=exchange_class();s.set_scenario(scenario);s.session_open=True;s.auction_phase=None
++            sym='AAPL';px=s.ref_prices[sym]
++            for name in ['alpha_0','inactive_0']:
++                s.portfolios[name]=Portfolio(team_id=name,role='trader',level=1,cash=175000.)
++            for name in ['provider_a','provider_b']:
++                s.portfolios[name]=Portfolio(team_id=name,role='broker',level=1,cash=1e6)
++                s.portfolios[name].positions[sym]=500
++                s.books[sym].place_order(team_id=name,side='sell',price=px,quantity=500,order_type='limit')
++            blocked=asyncio.Event();release=asyncio.Event();messages=[]
++            async def send(ws,msg):
++                messages.append(msg)
++                if ws=='alpha_0' and isinstance(msg,OrderAck):
++                    blocked.set();await release.wait()
++
++            if exchange_class is OfflineExchange:s._send=send
++            else:s._deliver_send=send
++            def order(name):return PlaceOrder(team_id=name,symbol=sym,side='buy',quantity=500,price=px,order_type='ioc')
++            first=asyncio.create_task(s._handle_place_order('alpha_0',order('alpha_0'),'alpha_0'))
++            await asyncio.wait_for(blocked.wait(),2)
++            await s._handle_place_order('inactive_0',order('inactive_0'),'inactive_0')
++            release.set();await first
++            total=sum(s.portfolios[n].positions.get(sym,0) for n in ['alpha_0','inactive_0'])
++            return total,[m.code for m in messages if isinstance(m,ErrorMsg)]
++    return asyncio.run(scenario())
++
++
++def test_original_matching_before_ack_exceeds_team_limit():
++    total,errors=run_race(OfflineExchange)
++    assert total==1000 and not errors
++
++
++def test_buffered_settlement_prevents_team_race():
++    from atomic_exchange import BufferedSettlementExchange
++    total,errors=run_race(BufferedSettlementExchange)
++    assert total==500 and errors==['POSITION_LIMIT']
++
++def test_held_moc_orders_are_not_reserved_by_original_venue():
++    async def scenario():
++        with runner.isolated(72,9,175000.,1) as (_,sc,accounts):
++            cfg.LEVERAGE_ENABLED=False
++            s=OfflineExchange();s.set_scenario(sc);s.session_open=True;s.auction_phase=None
++            sym='AAPL';px=s.ref_prices[sym];name='alpha_0'
++            s.portfolios[name]=Portfolio(team_id=name,role='trader',level=1,cash=1e6)
++            for provider in ['provider_a','provider_b','provider_c']:
++                s.portfolios[provider]=Portfolio(team_id=provider,role='broker',level=1,cash=1e6)
++                s.portfolios[provider].positions[sym]=500
++                s.books[sym].place_order(team_id=provider,side='sell',price=px,quantity=500,order_type='limit')
++            for _ in range(3):
++                await s._handle_place_order(name,PlaceOrder(team_id=name,symbol=sym,side='buy',quantity=500,price=0.,order_type='moc'),name)
++            assert len(s.moc_orders[sym])==3
++            await s.close_session(persist=False)
++            await s._run_closing_cross()
++            assert s.portfolios[name].positions[sym]==1500>sc.position_limit
++    asyncio.run(scenario())
+diff --git a/audit_review/code/test_fifo.py b/audit_review/code/test_fifo.py
+new file mode 100644
+index 0000000..1d26db0
+--- /dev/null
++++ b/audit_review/code/test_fifo.py
+@@ -0,0 +1,17 @@
++from fifo import overlay_fifo
++
++def fill(side,q,px,fee,account='a'):
++    return dict(account=account,symbol='AAPL',side=side,quantity=q,price=px,fee=fee,rebate=0.)
++
++def test_partial_closes_charge_both_entry_and_exit_fees():
++    r=overlay_fifo([fill('buy',2,100.,.6),fill('sell',1,102.,.306),fill('sell',1,99.,.297)])
++    assert r['count']==2 and r['wins']==1
++    assert abs(r['gains']-1.394)<1e-10 and abs(r['losses']-1.597)<1e-10
++
++def test_sale_and_buyback_of_grant_is_a_closed_overlay():
++    r=overlay_fifo([fill('sell',5,100.,1.5),fill('buy',5,90.,1.35)])
++    assert r['count']==1 and r['wins']==1 and abs(r['gains']-47.15)<1e-10
++
++def test_two_seats_cannot_close_each_other():
++    r=overlay_fifo([fill('buy',1,10.,0.,'a'),fill('sell',1,12.,0.,'b')])
++    assert r['count']==0
+diff --git a/audit_review/code/validate_outputs.py b/audit_review/code/validate_outputs.py
+new file mode 100644
+index 0000000..7edc1d7
+--- /dev/null
++++ b/audit_review/code/validate_outputs.py
+@@ -0,0 +1,22 @@
++"""Final output completeness and provenance checks; does not run trades."""
++import json,hashlib,socket
++from pathlib import Path
++from collections import Counter
++from network_guard import install
++ROOT=Path(__file__).resolve().parents[2];out=ROOT/'audit_review/results'
++install();s=socket.socket();blocked=False
++try:s.connect(('203.0.113.1',1))
++except RuntimeError:blocked=True
++finally:s.close()
++assert blocked  # connect implementation rejects before any kernel/network call
++allrows=[];counts={};code_hash=hashlib.sha256((ROOT/'audit_review/code/audit_study.py').read_bytes()).hexdigest()
++for stage,expected in [('reproduce',900),('fresh',900),('stress',2000),('paired_corrections',500)]:
++ rows=[json.loads(x) for x in (out/(stage+'.jsonl')).open()]
++ assert len(rows)==expected
++ cells=Counter((r['week'],r['candidate'],r['stress']) for r in rows);assert all(n==50 for n in cells.values())
++ protocol=json.loads((out/(stage+'_protocol.json')).read_text());assert protocol.get('code_sha256',protocol.get('study_code_sha256'))==code_hash
++ counts[stage]=len(rows);allrows+=rows
++checks={key:sum(r[key] for r in allrows) for key in ['liquidations','position_violations','team_position_violations','same_tick_fills','missing_fill_provenance']}
++assert not any(checks.values())
++result=dict(trials=counts,total_trials=len(allrows),unique_seed_ids=len({r['seed'] for r in allrows}),fresh_seed_ids=list(range(3000,3050)),performance_diagnostics=checks,max_per_symbol_shares=max(r['max_abs_position'] for r in allrows),max_reserved_team_symbol_shares=max(r['max_team_position'] for r in allrows),nonloopback_connect_guard_verified=blocked,study_code_unchanged=True)
++(out/'final_validation.json').write_text(json.dumps(result,indent=2));print(json.dumps(result,indent=2))
+diff --git a/audit_review/code/verify_sources.py b/audit_review/code/verify_sources.py
+new file mode 100644
+index 0000000..4753a7e
+--- /dev/null
++++ b/audit_review/code/verify_sources.py
+@@ -0,0 +1,21 @@
++import json,hashlib
++from pathlib import Path
++ROOT=Path(__file__).resolve().parents[2];archive=ROOT/'audit_review/extracted/2026Autumn-6-fresh'
++out=ROOT/'audit_review/results';out.mkdir(parents=True,exist_ok=True)
++protocol=json.loads((archive/'alpha_results/study/protocol.json').read_text())
++rows=[]
++for p,expected in protocol['source_sha256'].items():
++ actual=hashlib.sha256((archive/p).read_bytes()).hexdigest()
++ rows.append(dict(path=p,expected=expected,actual=actual,match=actual==expected))
++result={'files':rows,'all_match':all(x['match'] for x in rows)}
++(ROOT/'audit_review/results/source_verification.json').write_text(json.dumps(result,indent=2))
++print(len(rows),'files; all match:',result['all_match'])
++assert result['all_match']
++
++inputs=[]
++for item in json.loads((archive/'alpha_results/study/data_inventory.json').read_text()):
++ p=ROOT/'sessions'/Path(item['file']).name
++ actual=hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else None
++ inputs.append(dict(file=str(p),archive_input_present=(archive/'sessions'/p.name).exists(),local_present=p.exists(),expected_sha256=item['sha256'],actual_sha256=actual,matches=actual==item['sha256']))
++(out/'historical_inputs.json').write_text(json.dumps(inputs,indent=2))
++print(sum(x['matches'] for x in inputs),'of',len(inputs),'external historical inputs checksum matched')

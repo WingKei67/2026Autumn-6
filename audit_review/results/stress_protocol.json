@@ -1,0 +1,91 @@
+{
+  "stage": "stress",
+  "seeds": [
+    3000,
+    3001,
+    3002,
+    3003,
+    3004,
+    3005,
+    3006,
+    3007,
+    3008,
+    3009,
+    3010,
+    3011,
+    3012,
+    3013,
+    3014,
+    3015,
+    3016,
+    3017,
+    3018,
+    3019,
+    3020,
+    3021,
+    3022,
+    3023,
+    3024,
+    3025,
+    3026,
+    3027,
+    3028,
+    3029,
+    3030,
+    3031,
+    3032,
+    3033,
+    3034,
+    3035,
+    3036,
+    3037,
+    3038,
+    3039,
+    3040,
+    3041,
+    3042,
+    3043,
+    3044,
+    3045,
+    3046,
+    3047,
+    3048,
+    3049
+  ],
+  "names": [
+    "event_momentum",
+    "market_making",
+    "original",
+    "no_trade",
+    "combined_profit"
+  ],
+  "stresses": [
+    "fast_quotes",
+    "no_rebate",
+    "fees_60bps",
+    "latency_3ticks"
+  ],
+  "ticks": 1500,
+  "mode": "corrected",
+  "params": {
+    "event_momentum": {
+      "confirmation": 3,
+      "holding": 120,
+      "trailing": 2.0
+    },
+    "post_halt": {
+      "z": 2.5
+    },
+    "market_making": {
+      "width": 1.0,
+      "skew": 1.5
+    },
+    "basket": {
+      "z": 3.5,
+      "lookback": 60
+    }
+  },
+  "python": "3.10.11 (v3.10.11:7d4cc5aa85, Apr  4 2023, 19:05:19) [Clang 13.0.0 (clang-1300.0.29.30)]",
+  "archive_sha256": "1fe1d222c67447ace8f14ba5bcc2a9a8e1ce91e3b0303a5d344ba84f23f7cf76",
+  "code_sha256": "b2b9bedfd7e472188eb6f7bfd398c22cbdc246a3d5b73ebb5794b45d2f74aff8"
+}

@@ -1,0 +1,111 @@
+{
+  "generated_utc": "2026-10-30T06:57:27.839305+00:00",
+  "policy": "Preserve prior outputs; no refitting or tuning on test outcomes. New stress scope fixed before examining tests.",
+  "experiments": {
+    "validation_development.jsonl": {
+      "expected_runs": 400,
+      "saved_runs": 400,
+      "invalid_lines": 0,
+      "status": "completed",
+      "bytes": 16965149,
+      "sha256": "c5f403c4880b716b45e13ea29209c54f4b1ed5f105865543bc7e2ced06b7cc77"
+    },
+    "validation.jsonl": {
+      "expected_runs": 400,
+      "saved_runs": 400,
+      "invalid_lines": 0,
+      "status": "completed",
+      "bytes": 16998749,
+      "sha256": "07e212fdf4eb375ce95186919ebcb51b6288ebf2c589fb6c4506e7c062cdc848"
+    },
+    "test.jsonl": {
+      "expected_runs": 1400,
+      "saved_runs": 1400,
+      "invalid_lines": 0,
+      "status": "completed",
+      "bytes": 64036894,
+      "sha256": "2433650850a6333e24f2b63a991c52215ae82e2e56af54663eaea4fc0b47233e"
+    },
+    "priority_stress.jsonl": {
+      "expected_runs": 480,
+      "saved_runs": 480,
+      "invalid_lines": 0,
+      "status": "completed",
+      "bytes": 22227605,
+      "sha256": "9ff274d20667f8aac33702cdc1d65e19ad1f6834c41528147b2eafe7e8b17d98"
+    },
+    "historical_frozen.jsonl": {
+      "expected_runs": 15,
+      "saved_runs": 5,
+      "invalid_lines": 0,
+      "status": "partial",
+      "bytes": 274930,
+      "sha256": "e2023a1748aab1b7343479a3548ee54400a6ee7684408da003947ad43af7b5a8"
+    },
+    "historical_remaining.jsonl": {
+      "expected_runs": 10,
+      "saved_runs": 10,
+      "invalid_lines": 0,
+      "status": "completed",
+      "bytes": 498707,
+      "sha256": "aba82cfbf5ed4598f9ff45c7fe6226f5d19910cd06c6d9bdfcfe3c64d76b9629"
+    }
+  },
+  "deferred": [
+    "Corrected-label model refit and fresh validation (would invalidate completed selection)",
+    "Remaining 30 stress seeds; fast-quote and three-tick-latency stresses",
+    "Three sizing/uncertainty ablations",
+    "Historical chronological refit folds; existing tapes are not pristine holdouts"
+  ],
+  "development_caveats": [
+    "Original training labels condition on future absence of halts. Corrected diagnostic implementation is separate; frozen evaluation unchanged.",
+    "models_stockonly.json is an unevaluated alternative fit, not the model selected by completed validation.",
+    "Repeated validation uses the same 20 seed IDs and adds no independent evidence."
+  ],
+  "market_collection": {
+    "runs": 120,
+    "historical_recordings": 3
+  },
+  "completed_prior_work_not_rerun": [
+    "120 market collections",
+    "Three historical feature datasets",
+    "Two 400-run validation files on the same seeds",
+    "Model fits and parameter grids",
+    "Round I audit"
+  ],
+  "frozen_model_sha256": "d03f21e06503ee05c52a1e826c96dcbf123be9f1cb0d4b983826da4ab026d5ad",
+  "test_provenance_model_matches": true,
+  "frozen_code_matches": true,
+  "completion_source_sha256": {
+    "round2/__init__.py": "055556f7a1985430c80968dcb7b8353f7a59a7453da552a80d0fab74e7bfcd6b",
+    "round2/baselines.py": "a0d4eb2f585c7ac79c9c512ce9cbdebad37f414a7792f10137d73f823c609a81",
+    "round2/bootstrap.py": "884d4ceb629f4b662448aeeac5bb1a62ebb1a294f682e24e04471ec4b0ff2037",
+    "round2/completion_report.py": "531d03591803573163a20fdb0bdf8b3fbff487d5159ad4c0d7c5cefd1b67dded",
+    "round2/conftest.py": "b44335ff06b2df47b1caa218c060ebdbba508f037d8266bb8e68319cad26fd87",
+    "round2/experiments.py": "28c8c506ada4d91aec182aa411b027534113ba830fd9aaa338f02af8550b6a37",
+    "round2/features.py": "289cd12b209a05e258672c86e87d9fe30bbc27f9105cdce4306eeedeeae282df",
+    "round2/finish_experiments.py": "ec5cbcd42a674fca726643757d116a0f01c37babadabe3c2061a040b43b235d8",
+    "round2/fit_discovery.py": "fac5405fa1b02eccbcbf9be4983799c9fbf69a2bb9306ea282d0aabc8b5083a1",
+    "round2/gateway.py": "ac09b879dbb95b1a778eae61b9a40ebc8c32f9a524e346fa0c983fd564cbea6c",
+    "round2/history_eval.py": "42fb9286395de5ecb54e9b3747aaa2788a32677ed4fff070e36ee1da6eaa0ac9",
+    "round2/label_diagnostics.py": "44c9030550b9d6134b435ac47a7e7bca69c80eb3233be168e4a84de26fb7363d",
+    "round2/labels_review.py": "9f7d8700c30219f25710bfd75ecd961359359e2a2a61048a54b77a9360633bd8",
+    "round2/models.py": "7c28b9c17c9296fdca70e68ea03be4645048f11eb1ead48cf3783968c9908344",
+    "round2/research.py": "6f9fcefec93daebe3eff0beb690a2ccc2960c6b2f2a3f775a1dffa8ad17d9cfe",
+    "round2/runner.py": "c8737098258211dd896e8da3c499b91fabbc2087286ae514428b20067783d809",
+    "round2/strategies.py": "adbfc6c9dd9754e90d951926be627f83c941e5d290356258ae716279ac7bba5f"
+  },
+  "tests": {
+    "passed": 11,
+    "failed": 0,
+    "skipped": 0,
+    "artifact": "round2/results/completion_tests.xml"
+  },
+  "historical_combined": {
+    "saved_runs": 15,
+    "expected_runs": 15,
+    "unique_combinations": 15,
+    "initial_batch_status": "failed after five saved outputs; preserved",
+    "resumption": "only unsaved combinations, with closed-session arrival handled by actual exchange"
+  }
+}

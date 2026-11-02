@@ -1,0 +1,9 @@
+{
+  "reproduced_runs": 900,
+  "matched_primary_runs": 800,
+  "max_absolute_pnl_difference": 0.0,
+  "fill_count_mismatches": 0,
+  "historical_runs": 15,
+  "historical_max_pnl_difference": 0.0,
+  "paired_correction_runs": 500
+}

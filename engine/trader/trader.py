@@ -257,6 +257,7 @@ class Portfolio:
 
     def apply_server_update(self, update: PortfolioUpdate) -> None:
         """Sync all fields from an authoritative PortfolioUpdate message."""
+        self.liquidated = update.liquidated
         self.cash = update.cash
         self.positions = dict(update.positions)
         self.realized_pnl = update.realized_pnl

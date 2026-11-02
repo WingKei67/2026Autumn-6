@@ -1,0 +1,596 @@
+diff --git a/team/trader.py b/team/trader.py
+--- a/team/trader.py
++++ b/team/trader.py
+@@ -13,7 +13,7 @@
+ - This file adds six things on top of the parent:
+     ① SHOCK: a teacher-injected shock carries target prices but no pct →
+        derive pct ourselves and hand it to the parent's same logic
+-    ② Reaction guarantee: at least one order within REACT_AFTER_S seconds of
++    ② Reaction guarantee: at least one order within REACT_AFTER_TICKS venue ticks of
+        every event (course rule)
+     ③ No rejects:
+          - IOC orders only: any unfilled part is cancelled at once and never
+@@ -72,7 +72,7 @@
+ MAX_SHOCK_PCT = 0.20          # a derived move above 20% means our price is stale → don't trade
+ 
+ # ② Reaction guarantee
+-REACT_AFTER_S = 20.0          # no order for an event after 20 s → send one
++REACT_AFTER_TICKS = 20        # fallback after 20 venue ticks; grading window is 60
+ REACT_BID_DISCOUNT = 0.02     # that order: a 1-share IOC bid 2% under the best bid (won't fill, just "reacts")
+ 
+ # ③ No rejects
+@@ -102,9 +102,10 @@
+ 
+     def __init__(self) -> None:
+         super().__init__()
++        self._venue_tick = 0
+         self.ramp_ticks = DEFAULT_RAMP_TICKS
+         self.overshoot = DEFAULT_OVERSHOOT
+-        self._unanswered: list[tuple[float, set[str]]] = []   # events not yet answered: (time, symbols)
++        self._unanswered: list[tuple[int, set[str]]] = []   # events not yet answered: (venue_tick, symbols)
+         self._inflight: dict[str, list] = {}                  # orders in flight: symbol → [side, unfilled qty, sent at]
+         self._refs: dict[str, float] = {}                     # symbol → the exchange's fair price ref_price (for SHOCK)
+         self._portfolio = None                                # set by _Bot: on_ipo gets no portfolio argument
+@@ -118,9 +119,9 @@
+         Called once when the book opens (and again after a reconnect; a new
+         indication replaces the old one).
+ 
+-        - Price: the top of the range, hi → we are sure to be allocated
+-          (an oversubscribed book is cut back pro rata, so we can only get
+-          fewer shares, never more)
++        - Price: hi keeps the bid eligible at any offer within the range.
++          Allocation still depends on demand and available cash; a positive
++          allocation is not guaranteed.
+         - Size: what this seat can still hold under its cap. Allocated shares
+           skip the exchange's position check, but every later order (sells
+           included) must respect the team limit, so never bid above the cap.
+@@ -142,8 +143,10 @@
+         """Market news arrives here (CALENDAR_EVENT, SHOCK, DIVIDEND, IPO_* …).
+         The parent only handles CALENDAR_EVENT; we do our part first."""
+         # An event that names symbols → remember it for the ② reaction guarantee
++        if data.get("tick") is not None:
++            self._venue_tick = int(data["tick"])
+         if event in ("CALENDAR_EVENT", "SHOCK") and data.get("affected"):
+-            self._unanswered.append((self.now(), set(data["affected"])))
++            self._unanswered.append((self._venue_tick, set(data["affected"])))
+         # Remember the latest ramp shape; SHOCK needs it
+         if event == "CALENDAR_EVENT":
+             self.ramp_ticks = int(data.get("ramp_ticks") or self.ramp_ticks)
+@@ -183,7 +186,7 @@
+         """Called every tick. Return at most one Signal, or None to sit out."""
+         bot = getattr(self, "_bot", None)
+         if bot is not None and (
+-            bot._resync or bot._first_book or bot._entry_from_board
++            bot._resync or bot._first_book
+         ):
+             return None
+         now = self.now()
+@@ -201,9 +204,13 @@
+         # 4. An order for this symbol is still in flight → wait for its fill (never double-send)
+         if sig is None or sig.symbol in self._inflight:
+             return None
+-        # 5. An order for this symbol counts as a reaction to every event that named it
+-        self._unanswered = [(t, s) for t, s in self._unanswered if sig.symbol not in s]
+         return sig
++
++    def _step(self, plan, market, portfolio, nw, halted):
++        bot = getattr(self, "_bot", None)
++        if bot is not None and plan.symbol in bot._entry_from_board:
++            return None, 0.0
++        return super()._step(plan, market, portfolio, nw, halted)
+ 
+     def _size(self, sym: str, px: float, nw: float, pos: int) -> int:
+         """The parent's size, capped so the seat never exceeds its share of the team limit."""
+@@ -211,12 +218,15 @@
+ 
+     def _react(self, market, portfolio):
+         """② A 1-share bid well under the market for an event nothing else answered
+-        within REACT_AFTER_S seconds."""
+-        now = self.now()
++        within REACT_AFTER_TICKS venue ticks."""
++        now = self._venue_tick
+         for t, syms in self._unanswered:
+-            if now - t < REACT_AFTER_S:
++            if now - t < REACT_AFTER_TICKS:
+                 continue                    # too early: the parent may still trade it
+             for sym in sorted(syms):
++                bot = getattr(self, "_bot", None)
++                if bot is not None and sym in bot._entry_from_board:
++                    continue
+                 ref = market.best_bid(sym) or self._mids.get(sym)
+                 if ref and portfolio.can_buy(sym, 1, ref):
+                     return Signal(symbol=sym, side="buy", quantity=1,
+@@ -325,6 +335,8 @@
+         self._last_row: dict | None = None   # our latest leaderboard row = what the dashboard shows
+         self._unknown_tags: set[str] = set()  # message types outside the union, logged once each
+         self._ipo_pending: set[str] = set()
++        self._ipo_prices: dict[str, float] = {}
++        self._inferred_cash_adjustments = 0.0
+         self._entry_from_board: set[str] = set()   # symbols whose entry the next leaderboard row sets
+         self._t0 = time.monotonic()
+         self._dropped = False
+@@ -412,6 +424,10 @@
+             elif isinstance(msg, SessionEvent):
+                 await self._on_session_event(msg)
+             elif isinstance(msg, OrderAck):
++                self._owner._unanswered = [
++                    (tick, symbols) for tick, symbols in self._owner._unanswered
++                    if msg.symbol not in symbols
++                ]
+                 logging.info("ACK %s %s %d %s @ %.2f", msg.order_id[:8],
+                              msg.side, msg.quantity, msg.symbol, msg.price)
+             elif isinstance(msg, ErrorMsg):
+@@ -438,46 +454,48 @@
+         self.ledger.apply_fill(side, msg.symbol, msg.quantity, msg.price, fee)
+         d = msg.quantity if side == "buy" else -msg.quantity
+         self.portfolio.positions[msg.symbol] = self.portfolio.positions.get(msg.symbol, 0) + d
+-        self.portfolio.cash -= d * msg.price
++        self.portfolio.cash -= d * msg.price + fee
+         refs = self._owner._refs
+         logging.info("FILL %s %d %s @ %.2f (fee %.2f) → %s · %s", side, msg.quantity, msg.symbol,
+                      msg.price, fee, self.ledger.position_line(msg.symbol, refs),
+                      self.ledger.summary(refs))
+ 
++    def _book_ipo_allocations(self) -> None:
++        """Use the announced offer price, even while other symbols have orders in flight."""
++        for sym, offer in list(self._ipo_prices.items()):
++            if sym not in self._ipo_pending:
++                continue
++            qty = (self.portfolio.positions.get(sym, 0)
++                   - self.ledger.positions.get(sym, 0))
++            if qty <= 0:
++                continue
++            self.ledger.apply_allocation(sym, qty, offer)
++            self._ipo_pending.discard(sym)
++            self._ipo_prices.pop(sym, None)
++            self._entry_from_board.discard(sym)
++            logging.info("IPO ALLOCATED %d %s @ %.2f", qty, sym, offer)
++
+     def _on_portfolio(self, msg: PortfolioUpdate) -> None:
+-        """Resync after a connect, book non-trade position changes, reconcile at the close.
+-
+-        The exchange pushes a PortfolioUpdate after each of our fills and on
+-        every change it makes without a trade print. A position change that no
+-        fill explains is booked only for a known reason — an IPO allocation, or
+-        the starting-share grant (sent just before the pre-open / open event) —
+-        and anything else is left to show up as a MISMATCH, because it is a bug.
+-        """
++        """Recover state, book confirmed IPO allocations and starting grants."""
+         state = self._update_state(msg)
+         if self._resync:
+             self._sync("PortfolioUpdate", state)
+             return
+-        moved = {s: msg.positions.get(s, 0) - self.ledger.positions.get(s, 0)
+-                 for s in set(msg.positions) | set(self.ledger.positions)}
+-        moved = {s: d for s, d in moved.items() if d}
+-        if moved and not self._owner._inflight:
+-            if set(moved) <= self._ipo_pending:
+-                for sym, got in moved.items():
+-                    offer = round((self.ledger.cash - msg.cash) / got, 2)
+-                    self.ledger.apply_allocation(sym, got, offer)
+-                    self._ipo_pending.discard(sym)
+-                    self._entry_from_board.add(sym)
+-                    logging.info("IPO ALLOCATED %d %s @ %.2f", got, sym, offer)
+-            elif not self._session_open and all(d > 0 for d in moved.values()):
+-                for sym, got in sorted(moved.items()):
+-                    self.ledger.apply_grant(sym, got, self._owner._refs.get(sym, 0.0))
+-                    self._entry_from_board.add(sym)
+-                logging.info("GRANT starting shares (no trade print): %s",
+-                             ", ".join(f"+{d} {s}" for s, d in sorted(moved.items())))
++        self._book_ipo_allocations()
++        moved = {
++            sym: msg.positions.get(sym, 0) - self.ledger.positions.get(sym, 0)
++            for sym in set(msg.positions) | set(self.ledger.positions)
++        }
++        moved = {sym: qty for sym, qty in moved.items() if qty}
++        if (moved and not self._owner._inflight and not self._session_open
++                and not (set(moved) & self._ipo_pending)
++                and all(qty > 0 for qty in moved.values())):
++            for sym, qty in sorted(moved.items()):
++                self.ledger.apply_grant(sym, qty, self._owner._refs.get(sym, 0.0))
++                self._entry_from_board.add(sym)
++            logging.info("GRANT starting shares: %s", moved)
+         if self._closing:
+-            logging.info(
+-                "Close reconciliation awaits a leaderboard with entry prices"
+-            )
++            logging.info("Close reconciliation awaits a leaderboard with entry prices")
+ 
+     def _on_leaderboard(self, msg: Leaderboard) -> None:
+         """Keep our own leaderboard row: cash, positions, avg_cost, realized P&L, fees.
+@@ -488,6 +506,7 @@
+         Also logs one TICK line per broadcast (replaces the stock rich print,
+         whose rank was always "#?": the rows carry no rank, the list order is it).
+         """
++        self._owner._venue_tick = msg.tick
+         for board in (msg.traders, msg.brokers):     # each list is sorted by net worth
+             rank = next((i for i, e in enumerate(board, 1)
+                          if e.get("team_id") == _config.TEAM_ID), None)
+@@ -522,6 +541,7 @@
+         if self._resync:
+             self._sync("leaderboard", state)
+             return
++        self._book_ipo_allocations()
+         # Grants / IPO allocations: the exchange's own book cost replaces our mark
+         for sym in list(self._entry_from_board):
+             if (
+@@ -537,11 +557,17 @@
+             ):
+                 self.ledger.avg_entry[sym] = state["avg_cost"][sym]
+                 self._entry_from_board.discard(sym)
+-        # Interest on idle cash and margin carry accrue every tick with no message:
+-        # take the cash gap as a non-trade flow — but only a plausible one
++        # The venue does not publish each interest/carry cash flow. Retain
++        # bounded snapshot residuals, explicitly labelled as inferred adjustments.
+         gap = state["cash"] - self.ledger.cash
+         limit = max(ACCRUAL_MAX_ABS, ACCRUAL_MAX_FRAC * abs(self.ledger.cash))
+         if gap and not self._owner._inflight and abs(gap) <= limit:
++            self._inferred_cash_adjustments += gap
++            logging.info(
++                "INFERRED_CASH_ADJUSTMENT delta=%+.4f cumulative_this_run=%+.4f "
++                "source=snapshot_residual (not independently verified interest)",
++                gap, self._inferred_cash_adjustments,
++            )
+             self.ledger.accrue(gap)
+         if self._closing:
+             self._reconcile_close("leaderboard", state)
+@@ -584,6 +610,12 @@
+     def _reconcile_close(self, source: str, state: dict) -> None:
+         """Check accounting and P&L at the leaderboard's valuation marks."""
+         row = self._last_row or {}
++        logging.info(
++            "CASH_AUDIT inferred_adjustments_this_run=%+.4f "
++            "recorded_nontrade_flows=%+.4f residual_after_adjustments=%+.4f",
++            self._inferred_cash_adjustments, self.ledger.accruals,
++            state["cash"] - self.ledger.cash,
++        )
+         diffs = self.ledger.reconcile(**state)
+ 
+         marks = {}
+@@ -657,7 +689,7 @@
+         if self._owner._inflight:
+             return f"{nw} · check skipped (order in flight)"
+         diffs = self.ledger.reconcile(**self._row_state(self._last_row))
+-        return f"{nw} · " + ("matches exchange" if not diffs else "MISMATCH: " + "; ".join(diffs))
++        return f"{nw} · " + ("accounting fields match (cash includes disclosed adjustments)" if not diffs else "MISMATCH: " + "; ".join(diffs))
+ 
+     def _log_books(self, title: str = "BOOKS") -> None:
+         """The books as an aligned table, headed by the exchange check."""
+@@ -691,7 +723,7 @@
+             or not self._session_open
+             or self._resync
+             or self._first_book
+-            or self._entry_from_board
++            or signal.symbol in self._entry_from_board
+         ):
+             return
+ 
+@@ -738,6 +770,12 @@
+             self.auction = False
+         if msg.event == "IPO_OPEN" and d.get("symbol"):
+             self._ipo_pending.add(d["symbol"])
++        elif msg.event == "IPO_PRICED":
++            sym, offer = d.get("symbol"), d.get("offer_price")
++            if sym and offer is not None and float(offer) > 0:
++                self._ipo_prices[sym] = float(offer)
++                self._ipo_pending.add(sym)
++                self._book_ipo_allocations()
+         elif msg.event == "IPO_LISTED":
+             self._ipo_pending.discard(d.get("symbol", ""))
+         elif msg.event == "DIVIDEND" and d.get("symbol"):
+diff --git a/team/ledger.py b/team/ledger.py
+--- a/team/ledger.py
++++ b/team/ledger.py
+@@ -144,7 +144,7 @@
+         """One line: cash and the P&L totals."""
+         return (f"cash {self.cash:,.2f} · realized {self.realized_pnl:+,.2f} · "
+                 f"unrealized {self.unrealized_pnl(marks):+,.2f} · fees {self.fees:,.2f} · "
+-                f"interest/carry/dividends {self.accruals:+,.2f}")
++                f"non-trade cash incl. inferred residuals {self.accruals:+,.2f}")
+ 
+     def position_line(self, symbol: str, marks: dict[str, float]) -> str:
+         """One symbol: quantity, entry, mark and its unrealized P&L."""
+diff --git a/PHASE1.md b/PHASE1.md
+--- a/PHASE1.md
++++ b/PHASE1.md
+@@ -3,12 +3,12 @@
+ **Team:** Yao Zhao, Zhuoyan Ma, Jiacheng Li, Yiran Shao  
+ **Bot:** `team/trader.py`, seat `6_rings_trader_2`
+ 
+-**State tracking.** Our `arena.Trader` subclass generates event-driven IOC orders using the live book. `team/ledger.py` maintains cash, positions, average entries, realized P&L and fees from confirmed fills. Starting-share grants, IPO allocations and dividends are handled separately. Bounded cash accruals are recorded explicitly. At close, the revised reconciliation compares accounting fields and unrealized P&L using the venue’s same-row valuations; missing valuation data is reported as incomplete.
++**State tracking.** Our `arena.Trader` subclass generates event-driven IOC orders using the live book. `team/ledger.py` maintains cash, positions, average entries, realized P&L and fees from confirmed fills. Starting-share grants, IPO allocations and dividends are handled separately. Bounded snapshot cash residuals are labelled as inferred adjustments, logged individually and totalled at close; they are not independently verified interest. At close, the revised reconciliation compares accounting fields and unrealized P&L using the venue’s same-row valuations; missing valuation data is reported as incomplete.
+ 
+-**Recovery.** On disconnect, the bot reconnects with exponential backoff and jitter, sends a fresh handshake and rebuilds the book from incoming snapshots. Authoritative updates restore both the ledger and the portfolio used by the strategy. Entries unavailable in a portfolio update are recovered from the leaderboard. Strategy decisions pause while recovery is pending.
++**Recovery.** On disconnect, the bot reconnects with exponential backoff and jitter, sends a fresh handshake and rebuilds the book from incoming snapshots. Authoritative updates restore both the ledger and the portfolio used by the strategy. Entries unavailable in a portfolio update are recovered from the leaderboard. Strategy decisions pause during initial recovery; afterwards, an unresolved entry blocks only that symbol.
+ 
+-**ORCA decision.** We chose to indicate 150 shares at the $28 upper bound. Under the scenario’s stated lognormal valuation model, the expected valuation premium is approximately 14.6%, with approximately a 25% probability of finishing below the offer. We limited the indication to our intended position rather than inflating the bid to offset pro-rata allocation. The October 24 live log shows 111 ORCA shares at a $28 average entry.
++**ORCA decision.** We chose to indicate 150 shares at the $28 upper bound. The model is defined in `engine/exchange/ipo.py`: `POP_MU=0.12`, `POP_SIGMA=0.18`. It gives `exp(0.12 + 0.18²/2) - 1 = 14.59%` expected valuation premium and `Φ(-0.12/0.18) = 25.25%` probability of value below the offer. We limited the indication to our intended position rather than inflating the bid to offset pro-rata allocation. The October 24 live log shows 111 ORCA shares at a $28 average entry.
+ 
+-**Evidence.** Session 3 records same-tick fills for our seat following both NVDA and TSLA earnings events. Session 4 records its first fill at session-open +812 ticks, a fill 12 ticks after the GOOGL event, and a same-tick fill following the economic print. Both exports are market-only, so live uptime and rejection counts remain unverified. The original local rehearsal records 10 acknowledged orders, 26 fills, zero logged rejects and a survived disconnect/reconnect. Its close check omitted unrealized P&L; a new full-session log demonstrating the revised check remains pending. `evidence/pytest.txt` records 252 tests passed, with no failures or skips.
++**Evidence.** Session 3 records same-tick fills for our seat following both NVDA and TSLA earnings events. Session 4 records its first fill at session-open +812 ticks, a fill 12 ticks after the GOOGL event, and a same-tick fill following the economic print. Both exports are market-only, so live uptime and rejection counts remain unverified. The revised local rehearsal (`evidence/phase1_final_rehearsal.log`) uses real WebSocket transport and exchange matching over 2,400 open-market venue ticks with accelerated time. It demonstrates fills, an ORCA allocation, an induced disconnect/reconnect, zero trader rejects and final reconciliation including unrealized P&L. This is local validation, not the original Friday recording. Validation results and environment limits are in `evidence/phase1_validation.txt`.
+ 
+-**Purchase window 1.** We made no upgrade purchases.
++**Purchase window 1.** We made no upgrade purchases. A higher position limit would not expand our planned 150-share positions; the supplied evidence does not establish that a fee-tier upgrade would repay its cost.
+diff --git a/tests/test_phase1_final.py b/tests/test_phase1_final.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_phase1_final.py
+@@ -0,0 +1,100 @@
++"""Regression cases for cash, allocation, recovery gating and venue-tick reactions."""
++
++import asyncio
++import logging
++from pathlib import Path
++
++import pytest
++import trader.config as cfg
++from shared.messages import BookSnapshot, Leaderboard, SessionEvent, TradeExecution
++from team.ledger import Ledger
++from team.trader import MyTrader, _Bot
++from week2.week02_alpha_bot import Plan
++
++
++def make_bot(tmp_path: Path) -> _Bot:
++    bot = _Bot(MyTrader())
++    bot.ledger = Ledger(cash=10_000)
++    bot.portfolio.cash = 10_000
++    bot.portfolio.positions = {}
++    bot._state_path = tmp_path / "state.json"
++    return bot
++
++
++def add_book(bot: _Bot, symbol: str) -> None:
++    bot.market.update_book(BookSnapshot(
++        symbol=symbol, bids=[[99.9, 100]], asks=[[100.1, 100]],
++        mid_price=100, spread=0.2,
++    ))
++
++
++def test_fast_cash_patch_includes_fee(tmp_path):
++    bot = make_bot(tmp_path)
++    bot._on_trade(TradeExecution(
++        trade_id="t", symbol="AAPL", price=100, quantity=4,
++        buyer_id=cfg.TEAM_ID, seller_id="other", aggressor="buy",
++        fee=1.2, taker_id=cfg.TEAM_ID,
++    ))
++    assert bot.portfolio.cash == pytest.approx(9_598.8)
++    assert bot.ledger.cash == pytest.approx(bot.portfolio.cash)
++
++
++def test_ipo_pricing_books_while_unrelated_order_inflight(tmp_path):
++    bot = make_bot(tmp_path)
++    bot._owner._inflight = {"AAPL": ["buy", 1, bot._owner.now()]}
++    bot._ipo_pending = {"ORCA"}
++    bot.portfolio.positions = {"ORCA": 111}
++    bot.portfolio.cash = 6_892
++    asyncio.run(bot._on_session_event(SessionEvent(
++        event="IPO_PRICED", message="priced",
++        data={"symbol": "ORCA", "offer_price": 28},
++    )))
++    assert bot.ledger.positions == {"ORCA": 111}
++    assert bot.ledger.avg_entry == {"ORCA": 28}
++    assert bot.ledger.cash == 6_892
++    assert "ORCA" not in bot._ipo_pending
++    bot._book_ipo_allocations()
++    assert bot.ledger.cash == 6_892  # Allocation must not be applied twice.
++
++
++def test_one_missing_entry_does_not_block_other_symbol(tmp_path):
++    bot = make_bot(tmp_path)
++    owner = bot._owner
++    bot._entry_from_board = {"NVDA"}
++    for symbol in ["AAPL", "NVDA"]:
++        add_book(bot, symbol)
++        owner.plans[symbol] = Plan(
++            symbol, "ride", 100, 0.05, 1.3, owner.now(), 15,
++        )
++    signal = owner.on_tick(bot.market, bot.portfolio)
++    assert signal is not None and signal.symbol == "AAPL"
++
++
++def test_reaction_deadline_uses_venue_ticks(tmp_path):
++    bot = make_bot(tmp_path)
++    owner = bot._owner
++    owner.now = lambda: 1_000_000.0
++    owner._unanswered = [(100, {"AAPL"})]
++    add_book(bot, "AAPL")
++    owner._venue_tick = 119
++    assert owner._react(bot.market, bot.portfolio) is None
++    owner._venue_tick = 120
++    assert owner._react(bot.market, bot.portfolio) is not None
++
++
++def test_inferred_cash_is_explicit_and_totalled(tmp_path, caplog):
++    bot = make_bot(tmp_path)
++    row = {
++        "team_id": cfg.TEAM_ID, "cash": 10_002, "positions": {},
++        "avg_cost": {}, "net_worth": 10_002, "realized_pnl": 0,
++        "unrealized_pnl": 0, "unrealized_by_sym": {},
++    }
++    bot._closing = True
++    with caplog.at_level(logging.INFO):
++        bot._on_leaderboard(Leaderboard(
++            traders=[row], brokers=[], exchange_fees=0, tick=1,
++        ))
++    assert bot._inferred_cash_adjustments == 2
++    assert "source=snapshot_residual" in caplog.text
++    assert "CASH_AUDIT" in caplog.text
++    assert "inferred_adjustments_this_run=+2.0000" in caplog.text
+diff --git a/scripts/run_phase1_rehearsal.py b/scripts/run_phase1_rehearsal.py
+new file mode 100644
+--- /dev/null
++++ b/scripts/run_phase1_rehearsal.py
+@@ -0,0 +1,173 @@
++"""Run an accelerated LOCAL Week 4 rehearsal, not a Friday live session.
++
++The student bot uses a real WebSocket and the real exchange matching and
++settlement code. A controlled local counterparty supplies liquidity. The
++rehearsal advances 2,400 open-market venue ticks (40 minutes at the normal
++venue rate). Only this test process replaces the strategy's wall clock with
++exchange tick time. Default runtime is normally under two minutes; --realtime uses the ordinary
++one-second venue clock for about 40 minutes of wall-clock survival evidence.
++"""
++
++import argparse
++import asyncio
++import contextlib
++import logging
++import os
++import pathlib
++import sys
++import tempfile
++
++ROOT = pathlib.Path(__file__).resolve().parents[1]
++RUNTIME = pathlib.Path(tempfile.mkdtemp(prefix="phase1-rehearsal-"))
++# Set these before project imports so .env cannot route this test to a live venue.
++os.environ.update(
++    EXCHANGE_URL="ws://127.0.0.1:1",
++    TEAM_ID="6_rings_trader_2",
++    ARENA_TOKEN="",
++    GAME_WEEK="4",
++    SCENARIO_PATH=str(ROOT / "season/week04.json"),
++    SEASON_DIR=str(ROOT / "season"),
++    SEASON_PERSIST="false",
++    ROSTER_PATH=str(RUNTIME / "absent-roster.json"),
++    SEASON_PATH=str(RUNTIME / "season.json"),
++    AUTH_REQUIRED="false",
++    BASE_PRICES_PATH=str(RUNTIME / "absent-base.json"),
++    SEAT_POSITION_CAP="150",
++)
++sys.path[:0] = [str(ROOT), str(ROOT / "engine")]
++
++import websockets  # noqa: E402
++import exchange.config as exchange_config  # noqa: E402
++from exchange.server import ExchangeServer, Portfolio  # noqa: E402
++from shared.messages import PlaceOrder  # noqa: E402
++import team.trader as student  # noqa: E402
++from team.ledger import Ledger  # noqa: E402
++
++
++class CounterpartySink:
++    """Receive acknowledgements for the controlled local liquidity counterparty."""
++
++    async def send(self, raw: str) -> None:
++        pass
++
++
++async def run(real_time: bool = False) -> None:
++    """Exercise the submitted bot through a complete accelerated scenario."""
++    (ROOT / "evidence").mkdir(exist_ok=True)
++    logfile = ROOT / "evidence/phase1_final_rehearsal.log"
++    logging.basicConfig(
++        level=logging.INFO, force=True, filename=logfile, filemode="w",
++        format="%(asctime)s %(levelname)s %(message)s",
++    )
++    mode = "REAL-TIME" if real_time else "ACCELERATED"
++    logging.info(
++        "LOCAL %s REHEARSAL: Week 4, 2400 open-market venue ticks; "
++        "not an original Friday live recording", mode,
++    )
++    student._config.ARENA_TOKEN = ""
++    student._config.TICK_INTERVAL_SEC = 0.1 if real_time else 0.001
++    student.DROP_AFTER_S = 120.0 if real_time else 1.0
++    student.STATUS_EVERY_S = 30.0 if real_time else 10.0
++    venue = ExchangeServer()
++    exchange_config.SESSIONS_DIR = str(RUNTIME / "recordings")
++    maker = "rehearsal_mm"
++    venue.portfolios[maker] = Portfolio(
++        team_id=maker, role="broker", level=1, cash=10_000_000.0,
++    )
++    sink = CounterpartySink()
++
++    async with websockets.serve(venue.handle_client, "127.0.0.1", 0) as server:
++        port = server.sockets[0].getsockname()[1]
++        student._config.EXCHANGE_URL = f"ws://127.0.0.1:{port}"
++        owner = student.MyTrader()
++        if not real_time:
++            owner.now = lambda: float(venue.tick)
++        bot = student._Bot(owner)
++        # Keep this rehearsal's persistent books separate from the live seat.
++        bot._state_path = RUNTIME / "bot.json"
++        bot.ledger = Ledger()
++        task = asyncio.create_task(bot.run())
++        try:
++            for _ in range(100):
++                if bot._connects and not bot._resync:
++                    break
++                await asyncio.sleep(0.01)
++            assert bot._connects and not bot._resync, "Initial connection/resync failed"
++            await venue.open_session()
++
++            # Week 4 begins with a 12-tick pre-open, then 2,400 open-market ticks.
++            for _ in range(2412):
++                await venue.advance_tick()
++                if venue.session_open:
++                    for symbol, book in list(venue.books.items()):
++                        book.cancel_team_orders(maker)
++                        mark = venue.ref_prices[symbol]
++                        for side, price in (
++                            ("buy", round(mark * 0.9995, 2)),
++                            ("sell", round(mark * 1.0005, 2)),
++                        ):
++                            await venue._handle_place_order(
++                                sink,
++                                PlaceOrder(
++                                    team_id=maker, symbol=symbol, side=side,
++                                    quantity=100, price=price, order_type="limit",
++                                ),
++                                maker,
++                            )
++                for symbol, book in list(venue.books.items()):
++                    await venue._broadcast(venue._make_snapshot(symbol, book))
++                await venue._broadcast(venue._build_leaderboard())
++                await asyncio.sleep(1.0 if real_time else 0.01)
++
++            await venue.close_session(persist=False)
++            for _ in range(100):
++                if not bot._closing and "RECONCILE at close" in logfile.read_text():
++                    break
++                await asyncio.sleep(0.01)
++
++            data = logfile.read_text()
++            assert bot._connects >= 2, "Reconnect not demonstrated"
++            assert bot.rejects == 0, "Trader rejects occurred; inspect the log"
++            assert data.count("FILL ") > 0, "No fills occurred"
++            assert venue.ipo_allocations.get(student._config.TEAM_ID, 0) > 0, "No IPO allocation"
++            assert (
++                "OK: accounting and unrealized P&L match at venue valuation marks" in data
++            ), "Final reconciliation did not pass"
++            row = next(
++                row for row in venue._build_leaderboard().traders
++                if row["team_id"] == student._config.TEAM_ID
++            )
++            assert not bot.ledger.reconcile(**bot._row_state(row)), "Final accounting mismatch"
++            assert all(
++                abs(qty) <= student.SEAT_POSITION_CAP
++                for qty in bot.ledger.positions.values()
++            ), "Seat cap exceeded"
++            logging.info(
++                "LOCAL_VALIDATION PASSED: reconnect, fills, IPO, zero trader rejects, "
++                "final accounting and P&L reconciliation"
++            )
++            data = logfile.read_text()
++            print(f"LOCAL {mode} REHEARSAL — not original Friday participation")
++            print("LOG", logfile)
++            print("RAW RECORDINGS", RUNTIME / "recordings")
++            print(
++                "connects", bot._connects, "rejects", bot.rejects,
++                "fills", data.count("FILL "), "IPO allocations", venue.ipo_allocations,
++            )
++            for line in data.splitlines():
++                if any(tag in line for tag in (
++                    "CASH_AUDIT", "RECONCILE at close", "SESSION SUMMARY",
++                    "IPO ALLOCATED", "DISCONNECT", "RECONNECT",
++                )):
++                    print(line)
++        finally:
++            task.cancel()
++            with contextlib.suppress(asyncio.CancelledError):
++                await task
++
++
++if __name__ == "__main__":
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--realtime", action="store_true", help="Use the normal venue clock (about 40 minutes)")
++    args = parser.parse_args()
++    asyncio.run(run(real_time=args.realtime))

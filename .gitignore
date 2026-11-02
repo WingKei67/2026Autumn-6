@@ -12,3 +12,10 @@ team/state/
 
 # Secrets — your team token. NEVER commit this.
 .env
+
+.venv310/
+.venv311/
+
+# Offline alpha report caches (results and charts remain reviewable)
+alpha_results/**/mpl_cache/
+alpha_results/**/runner.pid

@@ -1,0 +1,2788 @@
+diff --git a/round2/__init__.py b/round2/__init__.py
+new file mode 100644
+--- /dev/null
++++ b/round2/__init__.py
+@@ -0,0 +1 @@
++"""Isolated Round II research. No live execution entry point."""
+diff --git a/round2/baselines.py b/round2/baselines.py
+new file mode 100644
+--- /dev/null
++++ b/round2/baselines.py
+@@ -0,0 +1,19 @@
++"""A stronger original-policy comparator, without changing the original file."""
++from alpha_lab.baselines import Original
++class ActiveOriginal(Original):
++    async def observe_async(self,obs,raw_events,pending):
++        from shared.messages import Signal
++        self.owner.now=lambda:float(obs.tick)
++        self.owner.on_event('FEE_SCHEDULE','',{'taker':obs.taker_fee,'rebate':obs.maker_rebate})
++        self.owner._refs.update(self.server.ref_prices)
++        self.owner._venue_tick=obs.tick
++        self.bot._session_open=obs.session_open
++        self.owner._week5_active=True
++        self.bot._on_portfolio(self.server.portfolios[self.bot.portfolio.team_id].to_message(self.server.ref_prices))
++        if not pending:self.owner._inflight.clear()
++        for e in raw_events:await self.bot._on_session_event(e)
++        self.owner._week5_active=True
++        for sym in self.server.books:self.bot.market.update_book(self.server._make_snapshot(sym,self.server.books[sym]))
++        signal=self.owner.on_tick(self.bot.market,self.bot.portfolio);self.collected=[]
++        if signal:await self.bot._place_order(signal)
++        return self.collected
+diff --git a/round2/bootstrap.py b/round2/bootstrap.py
+new file mode 100644
+--- /dev/null
++++ b/round2/bootstrap.py
+@@ -0,0 +1,11 @@
++import os,sys
++from pathlib import Path
++ROOT=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(ROOT))
++sys.path.insert(0,str(ROOT/'audit_review/code'))
++# Reuse the reviewed frozen baseline and offline connection guard.
++import audit_study as audit
++from alpha_lab import runner as baseline_runner
++from alpha_lab.data import recording_paths
++os.environ.setdefault('OMP_NUM_THREADS','1')
++os.environ.setdefault('OPENBLAS_NUM_THREADS','1')
+diff --git a/round2/completion_report.py b/round2/completion_report.py
+new file mode 100644
+--- /dev/null
++++ b/round2/completion_report.py
+@@ -0,0 +1,289 @@
++"""Read saved evidence only; generate the completion manifest, tables and report."""
++from pathlib import Path
++import json,csv,hashlib,datetime,os,collections
++import numpy as np
++ROOT=Path(__file__).resolve().parents[1];OUT=ROOT/'round2/results'
++os.environ.setdefault('MPLCONFIGDIR',str(ROOT/'round2/mpl_cache'))
++
++def read(name):
++    p=OUT/name;rows=[];invalid=0
++    if p.exists():
++        for line in p.open():
++            try:rows.append(json.loads(line))
++            except json.JSONDecodeError:invalid+=1
++    return rows,invalid
++def ci(v):
++    v=np.asarray(v,dtype=float)
++    if len(v)<2:return [None,None]
++    rng=np.random.default_rng(20261030)
++    return np.quantile(v[rng.integers(len(v),size=(10000,len(v)))].mean(1),[.025,.975]).tolist()
++def save_csv(name,rows):
++    if not rows:return
++    with (OUT/name).open('w',newline='') as f:
++        w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
++def table(rows,cols):
++    def fmt(v):
++        if v is None:return 'N/A'
++        if isinstance(v,float):return f'{v:,.2f}'
++        return str(v)
++    return '\n'.join(['| '+' | '.join(cols)+' |','| '+' | '.join(['---']*len(cols))+' |']+['| '+' | '.join(fmt(r.get(c)) for c in cols)+' |' for r in rows])
++def metrics(rows):
++    base={(r['seed'],r['week'],r['stress'],r['candidate']):r for r in rows}
++    out=[]
++    for stress in sorted({r['stress'] for r in rows}):
++        for week in ['pooled',5,9]:
++            for name in sorted({r['candidate'] for r in rows}):
++                rs=[r for r in rows if r['candidate']==name and r['stress']==stress and (week=='pooled' or r['week']==week)]
++                if not rs:continue
++                comparisons={}
++                for comparator in ['original_active','original','round1_combined','no_trade']:
++                    pairs=collections.defaultdict(list)
++                    for r in rs:
++                        b=base.get((r['seed'],r['week'],stress,comparator))
++                        if b:pairs[r['seed']].append(r['pnl']-b['pnl'])
++                    # For pooled claims, require both scenario weeks per seed.
++                    vals=[np.mean(v) for v in pairs.values() if len(v)==(2 if week=='pooled' else 1)]
++                    lo,hi=ci(vals)
++                    comparisons.update({f'delta_{comparator}':float(np.mean(vals)) if vals else None,f'low_{comparator}':lo,f'high_{comparator}':hi,f'pairs_{comparator}':len(vals)})
++                avg=lambda key:float(np.mean([r.get(key,0) for r in rs]))
++                out.append(dict(stress=stress,week=week,strategy=name,runs=len(rs),seeds=len({r['seed'] for r in rs}),net_pnl=avg('pnl'),gross_pnl=avg('gross_pnl_before_execution_fees'),fees=avg('total_net_fees'),rebates=avg('maker_rebates'),slippage=avg('slippage_vs_decision_mid'),turnover=avg('turnover'),fills=avg('fills'),sharpe=avg('session_sharpe'),worst_drawdown_pct=100*max(r['max_drawdown'] for r in rs),max_position=max(r['max_abs_position'] for r in rs),max_gross=max(r.get('max_aggregate_gross',r.get('max_gross',0)) for r in rs),liquidations=sum(r['liquidations'] for r in rs),position_violations=sum(r['position_violations'] for r in rs),team_violations=sum(r['team_position_violations'] for r in rs),same_tick_fills=sum(r['same_tick_fills'] for r in rs),**comparisons))
++    return out
++
++def charts(rows,stats,stress):
++    if not rows:return []
++    import matplotlib
++    matplotlib.use('Agg')
++    import matplotlib.pyplot as plt
++    dest=ROOT/'round2/figures';dest.mkdir(exist_ok=True)
++    names=['original_active','round1_combined','event_regime','cross_asset','adaptive_allocator','no_trade']
++    names=[n for n in names if any(r['candidate']==n for r in rows)]
++    fig,axes=plt.subplots(2,2,figsize=(13,8))
++    for col,week in enumerate([5,9]):
++        for name in names:
++            subset=[r for r in rows if r['candidate']==name and r['week']==week]
++            if not subset:continue
++            curves=np.array([r['audit_equity_curve'] for r in subset]);initial=np.array([r['initial_equity'] for r in subset])
++            axes[0,col].plot((curves-initial[:,None]).mean(0),label=name)
++            peaks=np.maximum.accumulate(np.c_[initial,curves],axis=1)[:,1:]
++            axes[1,col].plot(100*((curves-peaks)/peaks).mean(0),label=name)
++        axes[0,col].set_title(f'Week {week}: mean account P&L, after fees');axes[1,col].set_title(f'Week {week}: mean path drawdown (%)')
++        axes[1,col].set_xlabel('Continuous-trading tick');axes[0,col].legend(fontsize=7)
++    fig.tight_layout();fig.savefig(dest/'equity_drawdown.png',dpi=150);plt.close(fig)
++    fig,axes=plt.subplots(1,2,figsize=(13,4))
++    lookup={(r['seed'],r['week'],r['candidate']):r['pnl'] for r in rows}
++    for name in names:
++        if name in ['original_active','no_trade']:continue
++        vals=[]
++        for seed in sorted({r['seed'] for r in rows}):
++            keys=[(seed,w,n) for w in [5,9] for n in [name,'original_active']]
++            if all(k in lookup for k in keys):vals.append(np.mean([lookup[(seed,w,name)]-lookup[(seed,w,'original_active')] for w in [5,9]]))
++        axes[0].hist(vals,bins=20,histtype='step',label=name)
++    axes[0].axvline(0,color='black');axes[0].set_title('Paired mean of Weeks 5/9: increment vs original');axes[0].set_xlabel('Net P&L difference ($/scenario)');axes[0].legend(fontsize=7)
++    ss=[r for r in stats if r['week']=='pooled' and r['strategy'] in names]
++    x=np.arange(len(ss));axes[1].bar(x,[r['gross_pnl'] for r in ss],label='Gross MTM');axes[1].bar(x,[-r['fees'] for r in ss],label='Negative net fees')
++    axes[1].set_xticks(x,[r['strategy'] for r in ss],rotation=35,ha='right');axes[1].set_title('Gross return and fee decomposition ($)');axes[1].legend()
++    fig.tight_layout();fig.savefig(dest/'paired_pnl_costs.png',dpi=150);plt.close(fig)
++    return ['round2/figures/equity_drawdown.png','round2/figures/paired_pnl_costs.png']
++
++def main():
++    expected={'validation_development.jsonl':400,'validation.jsonl':400,'test.jsonl':1400,'priority_stress.jsonl':480,'historical_frozen.jsonl':15,'historical_remaining.jsonl':10}
++    manifest={'generated_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'policy':'Preserve prior outputs; no refitting or tuning on test outcomes. New stress scope fixed before examining tests.','experiments':{},'deferred':['Corrected-label model refit and fresh validation (would invalidate completed selection)','Remaining 30 stress seeds; fast-quote and three-tick-latency stresses','Three sizing/uncertainty ablations','Historical chronological refit folds; existing tapes are not pristine holdouts'],'development_caveats':['Original training labels condition on future absence of halts. Corrected diagnostic implementation is separate; frozen evaluation unchanged.','models_stockonly.json is an unevaluated alternative fit, not the model selected by completed validation.','Repeated validation uses the same 20 seed IDs and adds no independent evidence.']}
++    allrows={}
++    for file,count in expected.items():
++        rows,invalid=read(file);allrows[file]=rows;p=OUT/file
++        manifest['experiments'][file]={'expected_runs':count,'saved_runs':len(rows),'invalid_lines':invalid,'status':'completed' if len(rows)==count and not invalid else 'partial' if rows else 'not_completed','bytes':p.stat().st_size if p.exists() else 0,'sha256':hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else None}
++    manifest['market_collection']={'runs':len(json.loads((OUT/'market_manifest.json').read_text())),'historical_recordings':len(json.loads((OUT/'history_manifest.json').read_text()))}
++    manifest['completed_prior_work_not_rerun']=['120 market collections','Three historical feature datasets','Two 400-run validation files on the same seeds','Model fits and parameter grids','Round I audit']
++    manifest['frozen_model_sha256']=hashlib.sha256((OUT/'frozen_models.json').read_bytes()).hexdigest()
++    manifest['test_provenance_model_matches']=all(r.get('model_sha256')==manifest['frozen_model_sha256'] for r in allrows['test.jsonl'])
++    from round2.experiments import hashes
++    manifest['frozen_code_matches']=hashes()==json.loads((OUT/'frozen_protocol.json').read_text())['code_sha256']
++    manifest['completion_source_sha256']={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((ROOT/'round2').glob('*.py'))}
++    manifest['tests']={'passed':11,'failed':0,'skipped':0,'artifact':'round2/results/completion_tests.xml'}
++    historical_all=allrows['historical_frozen.jsonl']+allrows['historical_remaining.jsonl']
++    manifest['historical_combined']={'saved_runs':len(historical_all),'expected_runs':15,'unique_combinations':len({(r['week'],r['strategy']) for r in historical_all}),'initial_batch_status':'failed after five saved outputs; preserved','resumption':'only unsaved combinations, with closed-session arrival handled by actual exchange'}
++    (OUT/'experiment_status.json').write_text(json.dumps(manifest,indent=2))
++    rows=allrows['test.jsonl'];stats=metrics(rows);stress=metrics(allrows['priority_stress.jsonl'])
++    save_csv('oos_metrics.csv',stats);save_csv('priority_stress_metrics.csv',stress)
++    hist=[];hr=allrows['historical_frozen.jsonl']+allrows['historical_remaining.jsonl'];hb={(r['week'],r['strategy']):r for r in hr}
++    for r in hr:
++        b=hb.get((r['week'],'original_active'));nt=hb.get((r['week'],'no_trade'))
++        hist.append(dict(week=r['week'],strategy=r['strategy'],net_pnl=r['pnl'],delta_original_active=r['pnl']-b['pnl'] if b else None,delta_no_trade=r['pnl']-nt['pnl'] if nt else None,fees=r['total_net_fees'],fills=r['fills'],worst_drawdown_pct=r['max_drawdown']*100,liquidations=r['liquidations'],position_violations=r['position_violations']))
++    hist.sort(key=lambda r:(r['week'],r['strategy']))
++    save_csv('historical_metrics.csv',hist)
++    verification={}
++    for label,rr in [('test',rows),('priority_stress',allrows['priority_stress.jsonl']),('historical',hr)]:
++        rejects=collections.Counter()
++        for r in rr:rejects.update(r.get('rejects',{}))
++        verification[label]=dict(runs=len(rr),same_tick_fills=sum(r['same_tick_fills'] for r in rr),missing_fill_provenance=sum(r.get('missing_fill_provenance',0) for r in rr),liquidations=sum(r['liquidations'] for r in rr),position_violations=sum(r['position_violations'] for r in rr),team_position_violations=sum(r.get('team_position_violations',0) for r in rr),rejection_codes=dict(rejects))
++    verification['test_rejections_by_strategy']={name:dict(sum((collections.Counter(r.get('rejects',{})) for r in rows if r['candidate']==name),collections.Counter())) for name in sorted({r['candidate'] for r in rows})}
++    verification['new_strategy_maker_rebates']=sum(r['maker_rebates'] for r in rows+allrows['priority_stress.jsonl'] if r['strategy'] in ['event_regime','cross_asset','adaptive_allocator'])
++    verification['test_unique_keys']=len({(r['seed'],r['week'],r['candidate']) for r in rows})
++    (OUT/'verification.json').write_text(json.dumps(verification,indent=2))
++    lookup={(r['seed'],r['week'],r['candidate']):r for r in rows};attribution=[]
++    for name in sorted({r['candidate'] for r in rows}):
++        values=[]
++        for r in rows:
++            nt=lookup.get((r['seed'],r['week'],'no_trade'))
++            if r['candidate']!=name or nt is None:continue
++            cash=r['final_cash']-nt['final_cash']
++            overlay=sum((q-nt['final_positions'].get(s,0))*r['final_marks'][s] for s,q in r['final_positions'].items())
++            marks=sum(q*(r['final_marks'][s]-nt['final_marks'][s]) for s,q in nt['final_positions'].items())
++            initial=r['initial_equity']-nt['initial_equity']
++            delta=r['pnl']-nt['pnl']
++            values.append([cash,overlay,marks,-initial,delta,cash+overlay+marks-initial-delta])
++        if values:
++            avg=np.mean(values,axis=0)
++            attribution.append(dict(strategy=name,cash_difference=float(avg[0]),terminal_overlay_value=float(avg[1]),endowment_mark_difference=float(avg[2]),initial_equity_adjustment=float(avg[3]),net_excess_no_trade=float(avg[4]),max_accounting_residual=float(np.max(np.abs(np.array(values)[:,-1])))))
++    save_csv('pnl_attribution.csv',attribution)
++    diagnostic=[];path=OUT/'label_selection_diagnostics.csv'
++    if path.exists():
++        dr=list(csv.DictReader(path.open()))
++        for name in sorted({r['family'] for r in dr}):
++            ds=[r for r in dr if r['family']==name]
++            old=sum(int(r['old_label_count']) for r in ds);new=sum(int(r['corrected_label_count']) for r in ds)
++            oldret=sum(float(r['old_mean_net_touch'] or 0)*int(r['old_label_count']) for r in ds)
++            newret=sum(float(r['corrected_mean_net_touch'] or 0)*int(r['corrected_label_count']) for r in ds)
++            diagnostic.append(dict(family=name,old_labels=old,corrected_labels=new,old_mean_bps=10000*oldret/max(1,old),corrected_mean_bps=10000*newret/max(1,new)))
++    figs=charts(rows,stats,stress)
++    ranking=sorted([r for r in stats if r['week']=='pooled'],key=lambda r:r['net_pnl'],reverse=True)
++    new=[r for r in ranking if r['strategy'] in ['event_regime','cross_asset','adaptive_allocator']]
++    verdict=('No new strategy demonstrates a robust improvement over the active original bot.' if not any((r['low_original_active'] or -1)>0 for r in new) else 'At least one new strategy has a positive base-scenario paired interval; stress and historical limitations still govern robustness.')
++    tested=sum(len(allrows[n]) for n in ['test.jsonl','priority_stress.jsonl','historical_frozen.jsonl','historical_remaining.jsonl'])
++    report=f'''# AlgoArena Alpha Discovery Round II — completion report
++
++{verdict} This is a retrospective research result, not a deployment recommendation or a guarantee of live returns. The original project and Round I audit are preserved.
++
++## What completed and what was preserved
++
++The resumed task inspected saved code, logs, 120 market-data collections (40 discovery seeds × two weeks, 20 validation seeds × two weeks), three historical feature datasets, two 400-run validation files, model grids and frozen-model hashes. Neither completed validation nor Round I experiments were rerun. Both validation files use the **same 20 seeds**; they are not 40 independent seeds. The separate stock-only refit exists but was not substituted for the frozen validated model.
++
++This completion saved **{tested} additional exchange/replay runs**. Primary test seeds are **6000–6099**, separate from discovery 4000–4039, validation 4100–4119 and Round I seeds. Strategies, safety thresholds and model hashes were frozen before test execution. No test tuning occurred. Stress scope was reduced before results inspection to conserve usage. All testing used local isolated accounts; no hosted orders were submitted.
++
++{table([dict(file=k,**v) for k,v in manifest['experiments'].items()],['file','saved_runs','expected_runs','status'])}
++
++The first historical batch stopped after five saved results because the V3 fixture asserted on an in-flight order arriving after session close. Its partial output and failure log are preserved. Only the ten missing combinations were resumed; the real exchange now rejects closed-session arrivals normally. The two historical files together constitute the planned 15 runs, not 20.
++
++The machine-readable [status manifest](round2/results/experiment_status.json) includes hashes, partial-output counts and deferred work. Raw `.jsonl` journals and `.npz` datasets remain on disk (ignored by Git to avoid enormous diffs).
++
++## Out-of-sample strategy ranking
++
++Dollar figures are means per **1500-tick scenario**, with $175,000 total starting cash plus endowed shares. Pooled estimates average Weeks 5 and 9 **within each seed**, then bootstrap independent seed clusters (10,000 resamples; 95% intervals). Weeks are not counted as independent extra seeds. Confidence intervals are descriptive, unadjusted for multiple strategies and conditional on this generator.
++
++{table(ranking,['strategy','seeds','net_pnl','delta_original_active','low_original_active','high_original_active','delta_no_trade','fees','turnover','worst_drawdown_pct','liquidations','position_violations','team_violations'])}
++
++`original` preserves the exact frozen policy, including its Week 5 gate. `original_active` is the stricter comparator: the same original decision policy with the simulated venue clock supplied and the week gate enabled in both scenarios. This avoids claiming alpha merely by beating an inactive Week 9 bot. Both comparators are retained in the detailed CSV.
++
++{table([r for r in stats if r['week'] in [5,9] and r['strategy'] in ['original','original_active','round1_combined','adaptive_allocator','event_regime','cross_asset']],['week','strategy','net_pnl','delta_original_active','low_original_active','high_original_active','delta_original','delta_round1_combined'])}
++
++No-trade is endowed with shares and can earn positive MTM without any trading. Therefore account P&L alone is not alpha. Gross P&L adds back actual net execution fees; it is not a zero-cost counterfactual. Slippage/spread already affect fill prices and are not deducted twice. Detailed fees, rebates, slippage, fills, turnover, session-scaled Sharpe and exposure are in [oos_metrics.csv](round2/results/oos_metrics.csv). The original and new strategies have different target sizes within the same capital/risk envelope; a risk-normalized outperformance claim needs the deferred sizing ablation.
++
++## Transaction-cost and shock stresses
++
++These use the same preselected **20 seed IDs, 6000–6019**, in both weeks: they are robustness checks, not additional independent test seeds. `fees_60bps` doubles taker fees from 30 to 60 bps per side. `volatile` doubles fundamental volatility and background spreads and multiplies configured event magnitude ranges by 1.5. It is a joint stress and cannot isolate which change caused a loss.
++
++{table([r for r in stress if r['week']=='pooled'],['stress','strategy','seeds','net_pnl','delta_original_active','low_original_active','high_original_active','delta_no_trade','fees','worst_drawdown_pct','liquidations','position_violations','team_violations'])}
++
++New policies submit IOC orders and do not depend on maker rebates. Round I combined includes market making and its rebates; report net fees accordingly. The unexecuted 50-seed/four-stress plan is **not** represented as completed. Execution-latency and quote-refresh robustness remain unverified for Round II.
++
++## Historical recordings
++
++{table(hist,['week','strategy','net_pnl','delta_original_active','delta_no_trade','fees','fills','worst_drawdown_pct','liquidations','position_violations'])}
++
++All available Week 2, 3 and 4 files match the saved recording inventory; no Week 5 historical tape exists in that inventory. These tapes were examined in Round I, so they are **retrospective transfer tests, not genuinely untouched historical holdouts**. Frozen synthetic models are replayed without fitting to these outcomes. Chronological historical refits were deferred. Public books are replayed into the actual matching engine, but a historical book recording does not reveal the counterfactual queue reaction to our orders. Refilled recorded depth and missing cancellations/queue state limit realism. Historical market making/combined replay is omitted rather than assuming valid maker fills. Three days are insufficient for credible historical confidence intervals.
++
++The event policy made **zero fills on all three recordings**: its positive historical account P&L is grant exposure, not event alpha. Cross-asset and allocator activity was negative relative to no-trade where they traded. The active original received one normal `SESSION_CLOSED` arrival rejection per tape; this is not a crash or a fill outside session hours. These sparse, low-participation results do not support transfer of synthetic alpha.
++
++## Sources of apparent alpha and implementation findings
++
++1. **Event state:** public calendar payloads expose direction/magnitude and shock-shape information. The event model predicts remaining repricing from the last pre-announcement mid, public target, observed momentum, phase and liquidity. This is causal access to simulator news, but it encodes a programmed price trajectory. The original already uses this information; rediscovering it is not an independent information advantage.
++2. **Cross-asset movement:** lagged peer returns and relative movement predict some synthetic continuations, especially around shared macro shocks. The same generator drives peers; this does not establish a market lead-lag relationship. Microprice, imbalance and trade-flow predictors are entangled with the synthetic background order generator. Its quote spread, refresh interval, depth and informed-flow strength all co-vary with `seed % 3`; these are bundled regimes rather than independently identified effects. Synthetic strategies see four stock books (AAPL, NVDA, NFLX, AMD); historical replay can expose ten, changing the peer-return feature distribution.
++3. **Reversal:** the overshoot reversal model has only one qualifying validation opportunity/seed and is disabled. There are only two provisionally supported independent predictors. The third implemented strategy is an allocator of those two, averaging correlated forecasts rather than adding them. It is not a manufactured third alpha.
++4. **High severity — `round2/features.py:labels`:** the frozen training screen removes opportunities if a future halt occurs between entry and exit. That is future-outcome selection. Signal-screen returns and model-support flags are therefore biased and cannot establish statistical alpha. The execution tests do not drop those paths: orders encounter actual halts and account MTM includes adverse moves. Thus the untouched direct execution comparison still honestly evaluates the frozen policy, including any consequences of poor training.
++5. **Corrected implementation preserved separately:** `round2/labels_review.py:labels_with_halts` records rejected arrivals as zero payoff, retains intermediate halts, delays exits to the first tradable quote, and explicitly counts terminal censoring. Four regression tests cover these cases. It has **not** been used to refit the evaluated policy; no improved-profit claim follows from the fix.
++6. **Other limitations:** frozen model fitting included ARENA10 samples although the new policies trade stocks only; `models_stockonly.json` is an untested alternative. The uncertainty deduction `RMSE/sqrt(40)` is a heuristic, not a valid prediction interval. Grid/feature searches share validation data; existing conditional-return intervals do not correct selection. Missing two-sided quotes limit label coverage. These are reasons to reject model-confidence claims, even when execution P&L is measured correctly.
++7. **Historical adapter repair:** the saved `history_eval.py` imported `I` from the wrong module. This completion fixes that import and the historical fixture's decision-time/arrival-time assertion (by retaining actual exchange session/auction rejection); frozen synthetic trading code and model hashes stay unchanged. Original clock/session gating, execution callbacks and historical phase handling remain explicit in the adapter.
++
++Validation-only label diagnostics below use the **same frozen prediction threshold**, equities only, every third tick. These are overlapping quote-touch opportunities, **not independent trades, execution results or new confidence intervals**. Correcting selection need not reduce the mean; the sign of the bias is empirical. This diagnostic performs no refit and does not change OOS policies. Full rows are in `label_selection_diagnostics.csv`.
++
++{table(diagnostic,['family','old_labels','corrected_labels','old_mean_bps','corrected_mean_bps'])}
++
++## Where profit comes from
++
++The new policies buy selected positive expected repricing, use volatility-dependent sizes, and aim to exit after 10/20 ticks or a 1.8% stop. These are discrete-tick rules; halts/gaps can prevent the stop from executing at its threshold. They retain the initial grant during negative news, whereas the original can sell endowed inventory. The allocator can express more simultaneous opportunities, which also changes exposure. Additional P&L versus Round I, if shown above, is attributable to richer public-event information, entry timing and sizing together—not an isolated proof of a new predictor. Dollar performance versus no-trade separates grant drift, while the original comparison tests whether that package actually improves the incumbent.
++
++Exact terminal-account decomposition versus matched no-trade (means across both scenarios):
++
++{table(attribution,['strategy','cash_difference','terminal_overlay_value','endowment_mark_difference','initial_equity_adjustment','net_excess_no_trade','max_accounting_residual'])}
++
++Cash differences include executed costs and other cash flows. Terminal overlay value is the extra inventory marked at each candidate's own terminal venue mark. Endowment mark difference captures changes in valuation of granted shares caused by candidate-dependent market paths. These components sum to paired net P&L after the initial-equity adjustment; they do not imply guaranteed liquidation proceeds.
++
++## Execution and risk boundaries
++
++Orders are scheduled at decision time, reserve exposure, and reach the real local matching handler at least one tick later. Wire quantities are frozen in transit. Actual fills, partial fills, commissions/rebates and rejections determine accounts. Halts block decisions; an in-flight order may be rejected on arrival. The observed violation counts above are empirical outcomes, not a mathematical guarantee against every exchange race.
++
++Saved verification counters (including every completed stress and historical row):
++
++```json
++{json.dumps(verification,indent=2)}
++```
++
++The large `ORDER_NOT_FOUND` count belongs to Round I combined's cancel/replace behavior, not the new IOC policies. It is a measured operational weakness even though it did not breach position limits here. The new policies' only test rejection code was `SYMBOL_HALTED`, consistent with an order crossing a halt boundary while in transport.
++
++Each experiment shares one $175,000 total budget; Round I combined splits it across two sleeves. The conservative gateway caps at 150 stock shares per single sleeve, reserves pending buys/sells, forbids stock shorts, limits entry gross to min(40% starting cash, $70,000), reserves 60% starting cash, and stops adding risk below 70% starting-cash equity. Independent sleeve budgets are conservative relative to the venue team limit; the study also samples aggregate positions plus pending orders. Price changes can move gross exposure above an entry limit without a new order. There is no live multi-process reconnection/ACK-race certification in this research.
++
++New requests are at most 60 shares; model notional targets are capped at 20% starting cash, and the gateway can reduce them further. Forced final-window unwind attempts are shared across active strategies; a halted position can remain open and is valued using venue MTM. No depth-swept guaranteed cash exit is assumed. Session Sharpe is not annualized and is not an iid significance statistic.
++
++## Actionable improvements, in priority order
++
++1. **Keep the incumbent until a paired improvement is demonstrated.** Use `original_active` as the research comparator; do not replace the live bot with a model merely because gross or no-trade-relative P&L is positive.
++2. **Repair training selection before more optimization.** Use `labels_review.py`, keep reject/delay/censor flags, quantify missing-book coverage, and fit stocks only. A new discovery/validation cycle and new sealed seeds are required; 6000–6099 are now spent evaluation data.
++3. **Model execution value rather than unconditional touch returns.** Estimate fill probability, fee-adjusted realized markouts and halt-delayed exits from order journals. Replace the heuristic uncertainty haircut with seed/day-block validation and conservative prediction errors.
++4. **Isolate event information from exposure.** Compare equal-size original versus event model, remove public shock-shape fields, remove peer features, and separately test grant de-risking on negative news. These are hypotheses, not verified profit improvements; the deferred ablations are necessary.
++5. **Demand independent market evidence.** Acquire future untouched recordings and evaluate chronology, realistic latency, depth depletion and no-rebate performance. Do not optimize against a single programmed shock ramp and call it robust alpha.
++
++## Artifacts and reproduction
++
++Charts use saved OOS equity paths without rerunning experiments:
++
++![Mean equity and drawdown](round2/figures/equity_drawdown.png)
++
++![Paired increments and costs](round2/figures/paired_pnl_costs.png)
++
++All new strategies are in `round2/strategies.py`; discovery/model code, frozen parameters, source hashes, raw journals and prior partial/development results remain in `round2/`. The original `.env`, live bot, previous audit and unrelated Git changes are preserved. Tests executed in this completion: **11 passed, 0 failed, 0 skipped**; `round2/results/completion_tests.xml`. Seven tests cover existing policy behavior, four cover corrected labels. This does not rerun or recertify the full project suite.
++
++```bash
++# Regenerate tables, manifest and report from saved runs (no experiments):
++.venv310/bin/python -m round2.completion_report
++# Targeted regressions:
++.venv310/bin/python -m pytest round2/tests/test_round2.py round2/tests/test_labels_review.py -q
++# Exact primary experiment invocation used (writes test.jsonl; use a separate copy to reproduce):
++.venv310/bin/python -m round2.experiments --stage test --workers 8
++# These completion commands refuse to overwrite an existing output:
++.venv310/bin/python -m round2.finish_experiments --stage stress --workers 4
++.venv310/bin/python -m round2.finish_experiments --stage history --workers 3
++# Resume only unsaved historical combinations from the preserved partial batch:
++.venv310/bin/python -m round2.finish_experiments --stage history_resume --workers 2
++```
++
++The frozen runner does not make its original full-stage CLI append-safe. Preserve outputs or use a separate repository copy before reproducing that command. The completion runner explicitly refuses overwrites. Existing parameter sensitivity (`model_sensitivity.csv`) and predictor screens (`signal_screens.csv`) are saved development evidence with the label-selection caveat above; they are not new held-out results. Additional large experiments were deliberately deferred under the user's usage constraint.
++'''
++    (ROOT/'ROUND_II_REPORT.md').write_text(report)
++    (ROOT/'ALPHA_DISCOVERY.md').write_text('''# Alpha Discovery Round II
++
++**No new strategy robustly beats the original bot.** See [ROUND_II_REPORT.md](ROUND_II_REPORT.md) for full paired confidence intervals, costs, risk counters, charts and reproducibility.
++
++The strongest observed relationship is **remaining synthetic event repricing**: publicly announced magnitude, last pre-announcement mid and the observed phase of the programmed shock help predict subsequent prices. The original already consumes this event information. The event model and its allocator improve on Round I combined, but they do not outperform the incumbent on 100 untouched paired test seeds.
++
++**Peer returns** show some synthetic continuation around common macro shocks. Their separate strategy earns little beyond no-trade and loses that advantage under doubled taker fees. Shared shocks and bundled background spread/depth/refresh regimes confound a causal cross-asset interpretation. Microprice, imbalance and trade-flow features have not independently demonstrated incremental after-cost profitability.
++
++**Overshoot reversal is unsupported**: only one qualifying validation opportunity was found. It remains disabled. The third implemented strategy is an allocator of event and peer predictions, not a third independent alpha.
++
++The earlier label screen excluded opportunities encountering future halts. That selection invalidates its model-support confidence claims. A separate corrected diagnostic retains intermediate halts, scores rejected arrivals, delays exits and counts censoring; it was tested but not used to refit or tune the frozen policies. Correcting this selection does not necessarily lower a sample mean. Actual exchange OOS execution, including all halts, determines the final rankings.
++
++Across three previously inspected recordings, the event strategy never trades and the active new strategies lose relative to endowed no-trade. No untouched historical holdout is available. The synthetic event advantage has therefore not demonstrated empirical transfer.
++
++Research outputs and deferred work are recorded in [experiment_status.json](round2/results/experiment_status.json); [oos_metrics.csv](round2/results/oos_metrics.csv) ranks execution outcomes. Further model tuning requires a new development cycle and new sealed test seeds. Preserve the incumbent until that evidence exists.
++''')
++    print(json.dumps({'saved_runs':tested,'status':manifest['experiments'],'verdict':verdict},indent=2))
++if __name__=='__main__':main()
+diff --git a/round2/conftest.py b/round2/conftest.py
+new file mode 100644
+--- /dev/null
++++ b/round2/conftest.py
+@@ -0,0 +1,2 @@
++"""Keep isolated archive imports out of root test discovery; use explicit paths."""
++collect_ignore=['results','tests']
+diff --git a/round2/experiments.py b/round2/experiments.py
+new file mode 100644
+--- /dev/null
++++ b/round2/experiments.py
+@@ -0,0 +1,84 @@
++"""Development -> freeze -> untouched paired tests. Completely offline."""
++from round2.bootstrap import ROOT,audit
++import asyncio,argparse,json,hashlib,time,csv
++from pathlib import Path
++from concurrent.futures import ProcessPoolExecutor,as_completed
++import numpy as np
++from round2 import runner,strategies
++OUT=ROOT/'round2/results'
++BASE_REFRESH=runner.MarketPopulation.refresh
++NEW=['event_regime','cross_asset','adaptive_allocator']
++def hashes():
++    return {p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in [ROOT/'round2'/n for n in ['features.py','models.py','strategies.py','gateway.py','runner.py','baselines.py','experiments.py']]}
++def summary(server,accounts,receivers,gateways,*args):
++    r=audit.summarize(server,accounts,receivers,gateways,*args)
++    marks=server._bidask_marks()
++    r['final_cash']=sum(server.portfolios[a].cash for a in accounts)
++    r['final_positions']={sym:sum(server.portfolios[a].positions.get(sym,0) for a in accounts) for sym in server.books}
++    r['final_marks']={sym:float((marks.get(sym) or (None,None))[0] or server.ref_prices[sym]) for sym in server.books}
++    r['public_events']=[dict(event=e.event,data=e.data) for e in server.wire_events if e.event in ['CALENDAR_EVENT','TRADING_HALT','TRADING_RESUMED']]
++    return r
++async def fast_refresh(self,force=False):
++    self.ttl=1;return await BASE_REFRESH(self,force)
++def component(name,params):
++    if name=='round1_combined':return [('event_momentum',{'confirmation':3,'holding':120,'trailing':2.}),('market_making',{'width':1.,'skew':1.5})]
++    if name.startswith('allocator_'):
++        params={**params}
++        if name=='allocator_fixed8':params['size_mode']='fixed8'
++        if name=='allocator_single':params['max_entries']=1
++        if name=='allocator_no_uncertainty':params['uncertainty']=False
++        return [('adaptive_allocator',params)]
++    return [(name,params)]
++def job(payload):
++    seed,week,stress,candidates,stage=payload
++    strategies.MODEL_PATH=OUT/('models_discovery.json' if stage=='validation' else 'frozen_models.json')
++    runner.OBSERVER=None;runner.summarize=summary
++    runner.MarketPopulation.refresh=fast_refresh if stress=='fast_quotes' else BASE_REFRESH
++    result=[]
++    for name,params,key in candidates:
++        row=asyncio.run(runner.run_one(seed,component(name,params),week=week,stress=stress,ticks=1500))
++        row.update(candidate=key,strategy=name,split=stage,model_sha256=hashlib.sha256(strategies.MODEL_PATH.read_bytes()).hexdigest());result.append(row)
++    return result
++
++def execute(path,jobs,workers):
++    rows=[];t=time.monotonic()
++    with path.open('w') as f,ProcessPoolExecutor(max_workers=workers) as pool:
++        for i,future in enumerate(as_completed([pool.submit(job,j) for j in jobs]),1):
++            results=future.result();rows.extend(results)
++            for r in results:f.write(json.dumps(r,allow_nan=False)+'\n')
++            f.flush()
++            if i%10==0 or i==len(jobs):print(path.stem,i,'/',len(jobs),'runs',len(rows),'seconds',round(time.monotonic()-t),flush=True)
++    return rows
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--stage',choices=['validation','test','stress','ablations'],required=True);ap.add_argument('--workers',type=int,default=8);args=ap.parse_args()
++    if args.stage=='validation':
++        started_hashes=hashes();started_models=hashlib.sha256((OUT/'models_discovery.json').read_bytes()).hexdigest()
++        (OUT/'validation_started.json').write_text(json.dumps(dict(code_sha256=started_hashes,models_sha256=started_models),indent=2))
++        candidates=[(n,{'safety':s},f'{n}:safety={s}') for n in NEW for s in [.001,.003]]+[(n,{},n) for n in ['original','original_active','round1_combined','no_trade']]
++        rows=execute(OUT/'validation.jsonl',[(seed,w,'base',candidates,'validation') for seed in range(4100,4120) for w in [5,9]],args.workers)
++        assert hashes()==started_hashes and hashlib.sha256((OUT/'models_discovery.json').read_bytes()).hexdigest()==started_models
++        base={(r['seed'],r['week']):r['pnl'] for r in rows if r['candidate']=='original_active'};chosen={};scores=[]
++        for n in NEW:
++            choices=[]
++            for s in [.001,.003]:
++                key=f'{n}:safety={s}';v=[r for r in rows if r['candidate']==key]
++                delta=[r['pnl']-base[(r['seed'],r['week'])] for r in v]
++                # Optimize the requested objective, using validation only.
++                score=float(np.mean(delta));choices.append((score,s))
++                scores.append(dict(strategy=n,safety=s,mean_increment_vs_original_active=score,mean_pnl=float(np.mean([r['pnl'] for r in v]))))
++            chosen[n]={'safety':max(choices)[1]}
++        (OUT/'validation_selection.json').write_text(json.dumps(scores,indent=2))
++        (OUT/'frozen_models.json').write_bytes((OUT/'models_discovery.json').read_bytes())
++        protocol=dict(parameters=chosen,code_sha256=hashes(),models_sha256=hashlib.sha256((OUT/'frozen_models.json').read_bytes()).hexdigest(),discovery_seeds=list(range(4000,4040)),validation_seeds=list(range(4100,4120)),test_seeds=list(range(6000,6100)),stress_seeds=list(range(6000,6050)),weeks=[5,9],cash=175000,ticks=1500,taker_fee=.003,stress_definitions=['fees_60bps','volatile','fast_quotes','latency_3ticks'],selection='maximum mean paired net P&L increment versus active original on validation; no test inspection',shared_risk='same cash, 150 shares, 70k gross, 60% cash reserve, 60 shares/request; new per-name notional <=20% starting cash')
++        (OUT/'frozen_protocol.json').write_text(json.dumps(protocol,indent=2));print('Frozen',chosen,flush=True);return
++    protocol=json.loads((OUT/'frozen_protocol.json').read_text());assert hashes()==protocol['code_sha256'],'Frozen trading code changed; do not tune on the test set'
++    assert hashlib.sha256((OUT/'frozen_models.json').read_bytes()).hexdigest()==protocol['models_sha256']
++    candidates=[(n,protocol['parameters'][n],n) for n in NEW]+[(n,{},n) for n in ['original','original_active','round1_combined','no_trade']]
++    seeds=protocol['test_seeds'];stresses=['base']
++    if args.stage=='stress':
++        seeds=protocol['stress_seeds'];stresses=protocol['stress_definitions'];candidates=[c for c in candidates if c[0]!='original']
++    if args.stage=='ablations':
++        seeds=protocol['stress_seeds'];candidates=[(n,protocol['parameters']['adaptive_allocator'],n) for n in ['allocator_fixed8','allocator_single','allocator_no_uncertainty']]
++    execute(OUT/(args.stage+'.jsonl'),[(seed,w,stress,candidates,args.stage) for stress in stresses for seed in seeds for w in [5,9]],args.workers)
++if __name__=='__main__':main()
+diff --git a/round2/features.py b/round2/features.py
+new file mode 100644
+--- /dev/null
++++ b/round2/features.py
+@@ -0,0 +1,78 @@
++"""Causal features. All forward prices are confined to research label construction."""
++from dataclasses import dataclass,field
++from collections import defaultdict,deque
++import math
++import numpy as np
++from team.alpha.core import PublicEvent,Observation
++
++SYMBOLS=('AAPL','MSFT','NVDA','TSLA','AMZN','GOOGL','META','NFLX','AMD','INTC','ARENA10')
++FEATURES=['r1','r3','r10','r30','micro','imbalance','vol30','peer1','peer3','peer10','ann_remaining','peak_remaining','age','resume_age','lag_z','trade_flow','pct','spread']
++@dataclass(frozen=True)
++class FullEvent(PublicEvent):
++    pct:float=0.
++    ramp:int=15
++    overshoot:float=1.3
++@dataclass(frozen=True)
++class FullObservation(Observation):
++    trade_flow:dict=field(default_factory=dict)
++
++class FeatureStore:
++    def __init__(self):
++        self.history=defaultdict(lambda:deque(maxlen=180));self.news={};self.resumed={};self.current={}
++    def update(self,obs):
++        for e in obs.events:
++            if e.event=='CALENDAR_EVENT':
++                for sym in e.symbols:
++                    pre=self.history[sym][-1][1] if self.history[sym] else obs.quotes[sym].mid if sym in obs.quotes else 0.
++                    self.news[sym]=(e.tick,pre,getattr(e,'pct',0.),getattr(e,'ramp',15),getattr(e,'overshoot',1.3),e.kind)
++            elif e.event=='TRADING_RESUMED':
++                for sym in e.symbols:self.resumed[sym]=obs.tick
++        changes={}
++        for sym,q in obs.quotes.items():
++            h=self.history[sym]; past=dict(h)
++            changes[sym]=[q.mid/past[obs.tick-k]-1 if obs.tick-k in past else 0. for k in [1,3,10,30]]
++        result={}
++        for sym,q in obs.quotes.items():
++            if sym not in SYMBOLS:continue
++            h=self.history[sym];prices=np.array([p for _,p in list(h)[-31:]],dtype=float)
++            vol=float(np.std(np.diff(np.log(prices)))) if len(prices)>5 else .001
++            peers=[v for s,v in changes.items() if s!=sym and s!='ARENA10']
++            peer=np.mean(peers,axis=0) if peers else np.zeros(4)
++            tick,pre,pct,ramp,ov,kind=self.news.get(sym,(-10000,0.,0.,15,1.3,''))
++            age=obs.tick-tick
++            ann=pre*(1+pct)/q.mid-1 if pre and age<180 else 0.
++            peak=pre*(1+pct*ov)/q.mid-1 if pre and age<180 else 0.
++            lag=list(h)[-65:-5];center=np.mean([p for _,p in lag]) if len(lag)>=20 else q.mid
++            scale=max(q.mid*.001,float(np.std([p for _,p in lag]))) if lag else q.mid*.001
++            v=changes[sym]+[(q.microprice/q.mid-1),q.imbalance,vol,float(peer[0]),float(peer[1]),float(peer[2]),ann,peak,min(age,10000),min(obs.tick-self.resumed.get(sym,-10000),10000),(q.mid-center)/scale,getattr(obs,'trade_flow',{}).get(sym,0.),pct if age<180 else 0.,q.spread]
++            result[sym]=np.array(v,dtype=float)
++        for sym,q in obs.quotes.items():self.history[sym].append((obs.tick,q.mid))
++        self.current=result;return result
++
++class Recorder:
++    def __init__(self):self.store=FeatureStore();self.rows=[];self.events=[];self.fills_seen=0
++    def __call__(self,obs,raw,account,server):
++        if account!='alpha_0':return
++        f=self.store.update(obs)
++        for sym,v in f.items():
++            q=obs.quotes[sym];self.rows.append([obs.tick,SYMBOLS.index(sym),q.mid,q.bid,q.ask,int(sym in obs.halted or obs.market_halted or not obs.session_open),*v])
++        for e in raw:
++            self.events.append(dict(event=e.event,data=e.data))
++
++# Data columns: tick, symbol index, mid, bid, ask, ineligible, then FEATURES.
++def labels(data,horizon):
++    """Later-book touch screen, NOT a fill simulator. Entry tick t+1, exit t+h."""
++    n=len(data);forward=np.full(n,np.nan);long=np.full(n,np.nan);short=np.full(n,np.nan)
++    for sid in np.unique(data[:,1]):
++        idx=np.flatnonzero(data[:,1]==sid);a=data[idx];ticks=a[:,0]
++        entry=np.searchsorted(ticks,ticks+1);exit=np.searchsorted(ticks,ticks+horizon)
++        valid=(entry<len(a))&(exit<len(a));ii=np.flatnonzero(valid)
++        ii=ii[(ticks[entry[ii]]==ticks[ii]+1)&(ticks[exit[ii]]==ticks[ii]+horizon)]
++        # Every point between entry and exit must be eligible: cannot assume
++        # a liquidation at a stale halted quote or a continuously tradable path.
++        bad=np.r_[0,np.cumsum(a[:,5]>0)]
++        ii=ii[(bad[exit[ii]+1]-bad[entry[ii]]==0)&(a[ii,5]==0)]
++        dest=idx[ii];forward[dest]=a[exit[ii],2]/a[entry[ii],2]-1
++        long[dest]=(a[exit[ii],3]*(1-.003))/(a[entry[ii],4]*(1+.003))-1
++        short[dest]=(a[entry[ii],3]*(1-.003)-a[exit[ii],4]*(1+.003))/a[entry[ii],2]
++    return forward,long,short
+diff --git a/round2/finish_experiments.py b/round2/finish_experiments.py
+new file mode 100644
+--- /dev/null
++++ b/round2/finish_experiments.py
+@@ -0,0 +1,32 @@
++"""Budget-limited completion. Never overwrite an existing experiment output."""
++from round2.experiments import OUT,NEW,hashes,execute
++import argparse,json,hashlib
++from concurrent.futures import ProcessPoolExecutor,as_completed
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--stage',choices=['stress','history','history_resume'],required=True)
++    ap.add_argument('--workers',type=int,default=4);args=ap.parse_args()
++    p=json.loads((OUT/'frozen_protocol.json').read_text())
++    assert hashes()==p['code_sha256']
++    assert hashlib.sha256((OUT/'frozen_models.json').read_bytes()).hexdigest()==p['models_sha256']
++    path=OUT/('priority_stress.jsonl' if args.stage=='stress' else 'historical_remaining.jsonl' if args.stage=='history_resume' else 'historical_frozen.jsonl')
++    if path.exists():raise SystemExit(f'Refusing to overwrite {path}; inspect saved results first.')
++    if args.stage=='stress':
++        candidates=[(n,p['parameters'][n],n) for n in NEW]+[(n,{},n) for n in ['original_active','round1_combined','no_trade']]
++        # Fixed before reading any test results. Reduced from 50 to 20 seeds
++        # and from four to two stresses because the user requested economy.
++        jobs=[(s,w,stress,candidates,'priority_stress') for stress in ['fees_60bps','volatile'] for s in range(6000,6020) for w in [5,9]]
++        (OUT/'priority_stress_protocol.json').write_text(json.dumps(dict(seeds=list(range(6000,6020)),weeks=[5,9],stresses=['fees_60bps','volatile'],candidates=candidates,reason='Budget-limited completion fixed before test results inspection'),indent=2))
++        execute(path,jobs,args.workers)
++    else:
++        from round2.history_eval import job
++        items=json.loads((OUT/'history_manifest.json').read_text())
++        jobs=[(r,n,'frozen_synthetic') for r in items for n in NEW+['original_active','no_trade']]
++        if args.stage=='history_resume':
++            done={(r['week'],r['strategy']) for r in map(json.loads,(OUT/'historical_frozen.jsonl').read_text().splitlines())}
++            jobs=[j for j in jobs if (j[0]['week'],j[1]) not in done]
++        with path.open('x') as f,ProcessPoolExecutor(max_workers=args.workers) as pool:
++            for i,fu in enumerate(as_completed([pool.submit(job,j) for j in jobs]),1):
++                r=fu.result();f.write(json.dumps(r,allow_nan=False)+'\n');f.flush()
++                print(i,len(jobs),r['week'],r['strategy'],round(r['pnl'],2),flush=True)
++if __name__=='__main__':main()
+diff --git a/round2/fit_discovery.py b/round2/fit_discovery.py
+new file mode 100644
+--- /dev/null
++++ b/round2/fit_discovery.py
+@@ -0,0 +1,93 @@
++from round2.bootstrap import ROOT
++from round2.features import FEATURES,labels
++from round2.models import FAMILIES,mask,entry_mask,fit,predict,I
++import numpy as np,json,csv
++from pathlib import Path
++OUT=ROOT/'round2/results'
++CACHE={}
++def load(path):
++    if path not in CACHE:CACHE[path]=np.load(path)['data']
++    return CACHE[path]
++def ci(values):
++    v=np.asarray(values);rng=np.random.default_rng(91731)
++    if len(v)<2:return [None,None]
++    return np.quantile(v[rng.integers(0,len(v),(2000,len(v)))].mean(1),[.025,.975]).tolist()
++def save(path,rows):
++    if not rows:return
++    with path.open('w',newline='') as f:
++        w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
++def screen():
++    manifest=json.loads((OUT/'market_manifest.json').read_text());history=json.loads((OUT/'history_manifest.json').read_text())
++    groups={'discovery':[r for r in manifest if r['seed']<4100],'validation':[r for r in manifest if r['seed']>=4100],'historical':history}
++    cache={};screens=[];models=[];frozen={};sensitivity=[]
++    training=np.concatenate([load(r['path'])[:,6:] for r in groups['discovery']])
++    thresholds={name:(.01 if name in ['ann_remaining','peak_remaining','pct'] else float(np.quantile(np.abs(training[:,j]),.9))) for j,name in enumerate(FEATURES)}
++    (OUT/'screen_thresholds.json').write_text(json.dumps(thresholds,indent=2))
++    for group,files in groups.items():
++        for horizon in [3,5,10,20,40,60,120]:
++            sums={}
++            for r in files:
++                data=load(r['path']);v=data[:,6:];mid,long,short=labels(data,horizon)
++                # Every fifth tick reduces mechanical duplication; inference clusters by seed/day.
++                good=np.isfinite(mid)&(data[:,0]%5==0)&(data[:,1]<10)
++                for j,name in enumerate(FEATURES):
++                    if name in ['age','resume_age','spread','vol30']:continue
++                    cond=good.copy()
++                    if name in ['ann_remaining','peak_remaining','pct']:cond&=v[:,I['age']]<=120
++                    x=v[cond,j];y=mid[cond]
++                    if len(x)<10 or np.std(x)<1e-9:continue
++                    corr=float(np.corrcoef(x,y)[0,1]);direction=np.sign(x)
++                    payoff=np.where(direction>0,long[cond],short[cond])
++                    # Public gap >1%; other predictors top decile from their OWN past-file
++                    # only for descriptive screens, never used as trading thresholds.
++                    threshold=thresholds[name]
++                    selected=np.abs(x)>max(1e-9,threshold)
++                    if not selected.any():continue
++                    for rule in ['momentum','reversal']:
++                        directional=payoff if rule=='momentum' else np.where(direction>0,short[cond],long[cond])
++                        key=(name,horizon,rule);sums.setdefault(key,[]).append(dict(cluster=r.get('seed',r.get('week')),corr=corr,net=float(directional[selected].mean()),n=int(selected.sum())))
++            for (name,h,rule),rows in sums.items():
++                by_cluster={}
++                for item in rows:by_cluster.setdefault(item['cluster'],[]).append(item['net'])
++                cluster_net=[float(np.mean(v)) for v in by_cluster.values()]
++                corr_cluster={}
++                for item in rows:corr_cluster.setdefault(item['cluster'],[]).append(item['corr'])
++                clo,chi=ci([np.mean(v) for v in corr_cluster.values()])
++                lo,hi=ci(cluster_net);screens.append(dict(direction_rule=rule,correlation_ci_low=clo,correlation_ci_high=chi,split=group,feature=name,horizon=h,clusters=len(by_cluster),opportunities=sum(x['n'] for x in rows),mean_predictive_correlation=float(np.mean([x['corr'] for x in rows])),conditional_net_touch_return=float(np.mean(cluster_net)),ci_low=lo,ci_high=hi))
++    save(OUT/'signal_screens.csv',screens)
++    # Each family chooses horizon/ridge on validation later-touch net returns.
++    # No test seed is loaded, and predictors include no forward field.
++    for family in FAMILIES:
++        choices=[]
++        for h in [5,10,20,40]:
++            datasets={}
++            for split in ['discovery','validation']:
++                xs=[];ys=[];clusters=[];ticks=[]
++                for r in groups[split]:
++                    a=load(r['path']);_,y,_=labels(a,h);v=a[:,6:]
++                    keep=mask(v,family)&np.isfinite(y)&(a[:,0]%3==0)&(a[:,1]<10)
++                    xs.append(v[keep]);ys.append(y[keep]);clusters.extend([r['seed']*10+r['week']]*int(keep.sum()));ticks.extend(a[keep,0])
++                datasets[split]=(np.concatenate(xs),np.concatenate(ys),np.asarray(clusters),np.asarray(ticks))
++            x,y,_,_=datasets['discovery']
++            if len(y)<100:continue
++            for ridge in [.01,.1]:
++                model=fit(x,y,family,h,ridge);vx,vy,vc,vt=datasets['validation'];p=predict(vx,model)
++                selected=entry_mask(vx,family)&(p>.002)
++                # Non-overlapping opportunities per seed; use the best positive forecast
++                # at each decision epoch; units are returns, not guaranteed portfolio P&L.
++                values=[];count=0;seed_values={}
++                for seed in np.unique(vc):
++                    idx=np.flatnonzero((vc==seed)&selected);last=-10000;pay=[]
++                    for t in np.unique(vt[idx]):
++                        ks=idx[vt[idx]==t];k=ks[np.argmax(p[ks])]
++                        if t-last>=h:pay.append(vy[k]);last=t
++                    if pay:seed_values.setdefault(seed//10,[]).append(float(np.mean(pay)));count+=len(pay)
++                values=[float(np.mean(v)) for v in seed_values.values()]
++                low,high=ci(values);score=float(np.mean(values)) if values else -1.
++                row=dict(family=family,horizon=h,ridge=ridge,validation_clusters=len(values),opportunities=count,mean_net_touch_return=score,ci_low=low,ci_high=high)
++                sensitivity.append(row);model['validation']=row;choices.append(model)
++        chosen=max(choices,key=lambda m:m['validation']['mean_net_touch_return'])
++        chosen['supported_proxy']=bool(chosen['validation']['validation_clusters']>=10 and chosen['validation']['ci_low'] is not None and chosen['validation']['ci_low']>0)
++        frozen[family]=chosen;print(family,chosen['validation'],'supported',chosen['supported_proxy'],flush=True)
++    save(OUT/'model_sensitivity.csv',sensitivity);(OUT/'models_stockonly.json').write_text(json.dumps(frozen,indent=2))
++if __name__=='__main__':screen()
+diff --git a/round2/gateway.py b/round2/gateway.py
+new file mode 100644
+--- /dev/null
++++ b/round2/gateway.py
+@@ -0,0 +1,7 @@
++from round2.bootstrap import audit
++class Gateway(audit.CorrectedGateway):
++    def __init__(self,*args,**kwargs):
++        super().__init__(*args,**kwargs);self.aggregate_gross=0.
++    def sample_risk(self):
++        super().sample_risk()
++        self.aggregate_gross=max(self.aggregate_gross,sum(abs(q)*self.server.ref_prices.get(sym,0.) for a,p in self.server.portfolios.items() if a.startswith('alpha_') for sym,q in p.positions.items()))
+diff --git a/round2/history_eval.py b/round2/history_eval.py
+new file mode 100644
+--- /dev/null
++++ b/round2/history_eval.py
+@@ -0,0 +1,91 @@
++"""Funded chronological replay; all recordings were previously viewed in Round I."""
++from round2.bootstrap import ROOT,audit
++import asyncio,json,argparse,math
++from pathlib import Path
++from concurrent.futures import ProcessPoolExecutor,as_completed
++from dataclasses import fields,replace
++import numpy as np
++from round2.models import FAMILIES,mask,fit,I
++from round2.features import labels,FullObservation,FEATURES
++from round2.strategies import EventRegime,CrossAsset,AdaptiveAllocator
++from round2.baselines import ActiveOriginal
++from round2.gateway import Gateway
++from round2.runner import public_events
++OUT=ROOT/'round2/results'
++
++def walk_models():
++    models=json.loads((OUT/'frozen_models.json').read_text());manifest=json.loads((OUT/'history_manifest.json').read_text())
++    for week in [3,4]:
++        past=[r for r in manifest if r['week']<week];new={}
++        for family,template in models.items():
++            xs=[];ys=[]
++            for r in past:
++                a=np.load(r['path'])['data'];_,y,_=labels(a,template['horizon']);v=a[:,6:];keep=mask(v,family)&np.isfinite(y)&(a[:,0]%3==0)&(a[:,1]<10)
++                xs.append(v[keep]);ys.append(y[keep])
++            x=np.concatenate(xs);y=np.concatenate(ys)
++            if len(y)<50:new[family]={**template,'supported_proxy':False,'reason':'insufficient past-day eligible labels'};continue
++            m=fit(x,y,family,template['horizon'],template['ridge'])
++            m['train_rmse']*=math.sqrt(40/len(past)) # policy's sqrt(40) becomes sqrt(past days)
++            m.update(supported_proxy=template['supported_proxy'],train_days=[r['week'] for r in past],support_note='family support inherited from synthetic validation; not a historical significance claim')
++            new[family]=m
++        (OUT/f'walk_models_w{week}.json').write_text(json.dumps(new,indent=2))
++
++def job(payload):
++    item,name,mode=payload
++    from scripts.alpha_history import run_repaired
++    import alpha_lab.history as h
++    from shared.messages import TradeExecution
++    from alpha_lab.exchange import OfflineExchange as ActualExchange
++    h.Gateway=Gateway;h.public_events=public_events;h.summarize=audit.summarize
++    original=h.OfflineExchange;current=[]
++    class TrackedExchange(original):
++        def __init__(self):
++            super().__init__();current[:]=[self]
++            # A legal earlier decision can arrive after SESSION_CLOSED.
++            # Preserve the real exchange rejection rather than the V3 fixture's
++            # assertion that conflates decision time with arrival time.
++            async def arrive(ws,msg,team_id):
++                return await ActualExchange._handle_place_order(self,ws,msg,team_id)
++            self._handle_place_order=arrive
++    h.OfflineExchange=TrackedExchange
++    class HistoricalOriginal(ActiveOriginal):
++        def __init__(self,*args):
++            super().__init__(*args);s=self.server;old=s.receivers[args[0]]
++            def receive(msg):
++                old(msg)
++                if isinstance(msg,TradeExecution):self.on_fill(msg)
++            s.receivers[args[0]]=receive
++    async def original_observe(self,obs,raw,pending):
++        obs=replace(obs,session_open=self.server.session_open and self.server.auction_phase is None)
++        return await ActiveOriginal.observe_async(self,obs,raw,pending)
++    HistoricalOriginal.observe_async=original_observe
++    h.Original=HistoricalOriginal
++    modelpath=OUT/(f'walk_models_w{item["week"]}.json' if mode=='walk_forward' else 'frozen_models.json')
++    models=json.loads(modelpath.read_text());params=json.loads((OUT/'frozen_protocol.json').read_text())['parameters']
++    a=np.load(item['path'])['data'];first=int(a[:,0].min());flow={}
++    for r in a:flow.setdefault(int(r[0])-first+1,{})[__import__('round2.features',fromlist=['SYMBOLS']).SYMBOLS[int(r[1])]]=float(r[6+I['trade_flow']])
++    for key,cls in [('event_regime',EventRegime),('cross_asset',CrossAsset),('adaptive_allocator',AdaptiveAllocator)]:
++        def factory(cls=cls,key=key):
++            policy=cls(models=models,**params[key]);s=current[0];rx=s.receivers['alpha_0']
++            def receive(msg):
++                rx(msg)
++                if isinstance(msg,TradeExecution):policy.on_fill(msg,'alpha_0',s.tick)
++            s.receivers['alpha_0']=receive
++            observe=policy.observe
++            def observed(obs):return observe(FullObservation(**{**vars(obs),'session_open':s.session_open and s.auction_phase is None},trade_flow=flow.get(obs.tick,{})))
++            policy.observe=observed
++            return policy
++        h.STRATEGIES[key]=factory
++    actual='original' if name=='original_active' else name
++    row=asyncio.run(run_repaired(item['file'],actual,{},175000.));row.update(strategy=name,mode=mode)
++    return row
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--workers',type=int,default=6);args=ap.parse_args();walk_models()
++    manifest=json.loads((OUT/'history_manifest.json').read_text())
++    jobs=[(r,n,mode) for r in manifest for mode in (['frozen_synthetic','walk_forward'] if r['week']>2 else ['frozen_synthetic']) for n in ['event_regime','cross_asset','adaptive_allocator','original_active','no_trade']]
++    result=[]
++    with (OUT/'historical.jsonl').open('w') as f,ProcessPoolExecutor(max_workers=args.workers) as pool:
++        for i,fu in enumerate(as_completed([pool.submit(job,j) for j in jobs]),1):
++            r=fu.result();result.append(r);f.write(json.dumps(r,allow_nan=False)+'\n');f.flush();print(i,'/',len(jobs),r['week'],r['mode'],r['strategy'],round(r['pnl'],2),flush=True)
++if __name__=='__main__':main()
+diff --git a/round2/label_diagnostics.py b/round2/label_diagnostics.py
+new file mode 100644
+--- /dev/null
++++ b/round2/label_diagnostics.py
+@@ -0,0 +1,28 @@
++"""Evaluate saved validation labels without refitting or touching test policies."""
++from round2.bootstrap import ROOT
++from round2.features import labels
++from round2.labels_review import labels_with_halts
++from round2.models import entry_mask,predict
++import json,csv
++import numpy as np
++OUT=ROOT/'round2/results'
++
++def main():
++    models=json.loads((OUT/'frozen_models.json').read_text())
++    files=[r for r in json.loads((OUT/'market_manifest.json').read_text()) if r['seed']>=4100]
++    rows=[]
++    for item in files:
++        a=np.load(item['path'])['data'];cache={}
++        for family,m in models.items():
++            h=m['horizon']
++            if h not in cache:cache[h]=(labels(a,h)[1],labels_with_halts(a,h))
++            old,new=cache[h];y=new[1];v=a[:,6:]
++            candidate=entry_mask(v,family)&(predict(v,m)>.003)&(a[:,1]<10)&(a[:,0]%3==0)
++            oo=candidate&np.isfinite(old);nn=candidate&np.isfinite(y)
++            rows.append(dict(seed=item['seed'],week=item['week'],family=family,candidates=int(candidate.sum()),old_label_count=int(oo.sum()),corrected_label_count=int(nn.sum()),previously_dropped_scored=int((nn&~oo).sum()),old_mean_net_touch=float(old[oo].mean()) if oo.any() else None,corrected_mean_net_touch=float(y[nn].mean()) if nn.any() else None,**new[3]))
++    p=OUT/'label_selection_diagnostics.csv'
++    if p.exists():raise SystemExit('Preserving existing diagnostic output')
++    with p.open('x',newline='') as f:
++        w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
++    print('Saved',len(rows),'validation diagnostics; no models refitted.')
++if __name__=='__main__':main()
+diff --git a/round2/labels_review.py b/round2/labels_review.py
+new file mode 100644
+--- /dev/null
++++ b/round2/labels_review.py
+@@ -0,0 +1,33 @@
++"""Corrected diagnostic labels, kept separate from frozen evaluated models.
++
++Intermediate halts must not select which signals are scored. IOC arrival
++rejection has zero trading payoff. Exit during a halt waits until resumption.
++Terminally censored observations remain NaN and are explicitly counted.
++This is a quote-touch screen, not exchange execution or a deployable model.
++"""
++import numpy as np
++
++def labels_with_halts(data,horizon):
++    result=[np.full(len(data),np.nan) for _ in range(3)]
++    stats=dict(eligible_decisions=0,entry_rejected=0,delayed_exits=0,terminal_censored=0,missing_entry_quote=0)
++    for sid in np.unique(data[:,1]):
++        idx=np.flatnonzero(data[:,1]==sid);a=data[idx];ticks=a[:,0]
++        for i in range(len(a)):
++            if a[i,5] or ticks[i]+horizon>ticks[-1]:continue
++            stats['eligible_decisions']+=1
++            j=np.searchsorted(ticks,ticks[i]+1)
++            if j==len(a) or ticks[j]!=ticks[i]+1:
++                stats['missing_entry_quote']+=1;continue
++            if a[j,5]:
++                stats['entry_rejected']+=1
++                for v in result:v[idx[i]]=0.
++                continue
++            k=np.searchsorted(ticks,ticks[i]+horizon)
++            delayed=k<len(a) and bool(a[k,5])
++            while k<len(a) and a[k,5]:k+=1
++            if k==len(a):stats['terminal_censored']+=1;continue
++            if delayed:stats['delayed_exits']+=1
++            result[0][idx[i]]=a[k,2]/a[j,2]-1
++            result[1][idx[i]]=a[k,3]*.997/(a[j,4]*1.003)-1
++            result[2][idx[i]]=(a[j,3]*.997-a[k,4]*1.003)/a[j,2]
++    return (*result,stats)
+diff --git a/round2/models.py b/round2/models.py
+new file mode 100644
+--- /dev/null
++++ b/round2/models.py
+@@ -0,0 +1,42 @@
++"""Small regularized predictors, causal feature transforms shared with execution."""
++import numpy as np
++from round2.features import FEATURES
++I={n:i for i,n in enumerate(FEATURES)}
++FAMILIES=['event_regime','overshoot_reversal','cross_asset']
++def mask(v,family):
++    age=v[...,I['age']]
++    if family=='event_regime':return (age>=0)&(age<=120)&(np.abs(v[...,I['pct']])>.005)
++    if family=='overshoot_reversal':return (age>=10)&(age<=120)&(v[...,I['pct']]<-.005)
++    return np.abs(v[...,I['peer3']])>.001
++
++def entry_mask(v,family):
++    m=mask(v,family)
++    if family=='event_regime':return m&(v[...,I['age']]<=10)
++    if family=='overshoot_reversal':return m&(v[...,I['ann_remaining']]>.002)
++    return m
++
++def design(v,family):
++    v=np.asarray(v);cols=[]
++    if family in ['event_regime','overshoot_reversal']:
++        for name in ['ann_remaining','peak_remaining','pct','r1','r3','r10','micro','imbalance','vol30','spread','trade_flow']:
++            cols.append(v[...,I[name]])
++        age=v[...,I['age']]
++        for lo,hi in [(0,5),(6,15),(16,30),(31,120)]:
++            phase=((age>=lo)&(age<=hi)).astype(float)
++            cols.extend([phase,phase*v[...,I['ann_remaining']],phase*v[...,I['pct']]])
++    else:
++        for name in ['r1','r3','r10','peer1','peer3','peer10','micro','imbalance','vol30','spread','trade_flow']:
++            cols.append(v[...,I[name]])
++        cols.extend([v[...,I['peer3']]-v[...,I['r3']],v[...,I['peer10']]-v[...,I['r10']]])
++    return np.stack(cols,axis=-1)
++
++def fit(x,y,family,horizon,ridge):
++    z=design(x,family);mu=z.mean(0);sd=z.std(0);sd[sd<1e-8]=1.
++    z=(z-mu)/sd;z=np.c_[np.ones(len(z)),z]
++    penalty=np.eye(z.shape[1])*len(z)*ridge;penalty[0,0]=0.
++    beta=np.linalg.solve(np.einsum('ni,nj->ij',z,z)+penalty,np.einsum('ni,n->i',z,y))
++    return dict(family=family,horizon=horizon,ridge=ridge,mean=mu.tolist(),scale=sd.tolist(),beta=beta.tolist(),train_rows=len(y),train_rmse=float(np.sqrt(np.mean((np.einsum('ni,i->n',z,beta)-y)**2))))
++
++def predict(v,model):
++    x=(design(v,model['family'])-np.asarray(model['mean']))/np.asarray(model['scale'])
++    return np.asarray(model['beta'])[0]+np.einsum('...i,i->...',x,np.asarray(model['beta'])[1:])
+diff --git a/round2/research.py b/round2/research.py
+new file mode 100644
+--- /dev/null
++++ b/round2/research.py
+@@ -0,0 +1,72 @@
++"""Offline causal discovery datasets and seed-clustered prediction screens."""
++from round2.bootstrap import ROOT,audit
++import argparse,asyncio,json,csv,hashlib,time
++from pathlib import Path
++from concurrent.futures import ProcessPoolExecutor,as_completed
++import numpy as np
++from round2 import runner
++from round2.features import Recorder,FEATURES,SYMBOLS,labels
++OUT=ROOT/'round2/results'
++
++def collect_job(payload):
++    seed,week=payload;rec=Recorder();runner.OBSERVER=rec;runner.summarize=audit.summarize
++    row=asyncio.run(runner.run_one(seed,[('no_trade',{})],ticks=1500,week=week))
++    path=OUT/f'market_{seed}_{week}.npz';np.savez_compressed(path,data=np.asarray(rec.rows))
++    (OUT/f'events_{seed}_{week}.json').write_text(json.dumps(rec.events))
++    return dict(seed=seed,week=week,path=str(path),rows=len(rec.rows),pnl=row['pnl'])
++
++def historical():
++    from alpha_lab.history import frames
++    from alpha_lab.data import recording_paths,rows
++    from round2.features import FeatureStore,FullObservation
++    from team.alpha.core import Quote
++    from round2.runner import public_events
++    from shared.messages import SessionEvent
++    manifest=[]
++    for path in recording_paths(ROOT/'sessions'):
++        store=FeatureStore();latest={};output=[];halted=set();market_halt=False;opened=False
++        flows={};seen=set()
++        for row in rows(path):
++            msg=row.get('msg',row)
++            if msg.get('type')!='trade_execution':continue
++            tid=msg.get('trade_id');t=row.get('tick');sym=msg.get('symbol')
++            if tid in seen or t is None:continue
++            seen.add(tid);signed,total=flows.get((t,sym),(0,0));q=msg.get('quantity',0)
++            flows[(t,sym)]=(signed+q*(1 if msg.get('aggressor')=='buy' else -1),total+q)
++        for tick,frame in frames(path):
++            latest.update(frame['books']);raw=[SessionEvent.model_validate(x) for x in frame['events']]
++            for e in raw:
++                d=e.data or {}
++                if e.event=='SESSION_OPEN':opened=True
++                if e.event in ['SESSION_CLOSED','SESSION_PRECLOSE','SESSION_PREOPEN']:opened=False
++                if e.event=='TRADING_HALT' and d.get('symbol'):halted.add(d['symbol'])
++                if e.event=='TRADING_RESUMED':halted.discard(d.get('symbol'))
++                if e.event=='MARKET_HALT':market_halt=True
++                if e.event=='MARKET_RESUMED':market_halt=False
++            quotes={}
++            for sym,b in latest.items():
++                if sym not in SYMBOLS or sym=='ARENA10' or not b.get('bids') or not b.get('asks'):continue
++                bid,bsize=b['bids'][0];ask,asz=b['asks'][0]
++                if 0<bid<ask:quotes[sym]=Quote(bid,ask,int(bsize),int(asz))
++            events=tuple(__import__('dataclasses').replace(e,tick=tick) for e in public_events(raw))
++            flow={s:a/max(1,b) for (t,s),(a,b) in flows.items() if t==tick}
++            obs=FullObservation(tick,quotes,{},175000.,175000.,175000.,frozenset(halted),market_halt,opened,events,trade_flow=flow)
++            for sym,v in store.update(obs).items():
++                q=quotes[sym];output.append([tick,SYMBOLS.index(sym),q.mid,q.bid,q.ask,int(not opened or market_halt or sym in halted),*v])
++        week=int(path.name.split('week')[1][:2]);dest=OUT/f'history_w{week}.npz';np.savez_compressed(dest,data=np.asarray(output));manifest.append(dict(week=week,file=str(path),sha256=hashlib.sha256(path.read_bytes()).hexdigest(),rows=len(output),path=str(dest),status='previously examined; retrospective chronological fold only'))
++    (OUT/'history_manifest.json').write_text(json.dumps(manifest,indent=2))
++    return manifest
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--stage',choices=['collect','history'],required=True);ap.add_argument('--workers',type=int,default=8);args=ap.parse_args();OUT.mkdir(exist_ok=True)
++    if args.stage=='history':print(historical());return
++    # Existing audit used 0..11,1000..1049,2000..2049,3000..3049.
++    protocol=dict(discovery_seeds=list(range(4000,4040)),validation_seeds=list(range(4100,4120)),sealed_test_seeds=list(range(6000,6100)),weeks=[5,9],horizons=[3,5,10,20,40,60,120],test_not_used_for_discovery=True)
++    (OUT/'research_protocol.json').write_text(json.dumps(protocol,indent=2))
++    jobs=[(seed,w) for seed in protocol['discovery_seeds']+protocol['validation_seeds'] for w in protocol['weeks']];result=[];t=time.monotonic()
++    with ProcessPoolExecutor(max_workers=args.workers) as pool:
++        for i,f in enumerate(as_completed([pool.submit(collect_job,j) for j in jobs]),1):
++            result.append(f.result())
++            if i%10==0:print(i,'/',len(jobs),'seconds',round(time.monotonic()-t),flush=True)
++    (OUT/'market_manifest.json').write_text(json.dumps(result,indent=2))
++if __name__=='__main__':main()
+diff --git a/round2/runner.py b/round2/runner.py
+new file mode 100644
+--- /dev/null
++++ b/round2/runner.py
+@@ -0,0 +1,290 @@
++"""One isolated strategy experiment using real local exchange handlers.
++
++The exogenous population is a deliberately simple, seeded liquidity/flow model,
++not a claim to reproduce hosted participants. Each candidate gets its own
++exchange; candidates never trade against each other or see private future state.
++"""
++from contextlib import contextmanager
++from copy import deepcopy
++from dataclasses import asdict, replace
++from functools import lru_cache
++import json
++import logging
++import math
++import os
++from pathlib import Path
++import random
++import tempfile
++from unittest.mock import patch
++
++import exchange.config as cfg
++import exchange.persistence as persistence
++from exchange.scenario import load_week
++from exchange.server import Portfolio
++from plugins.securities import defaults
++from shared.messages import PlaceOrder, CancelOrder, SessionEvent, ErrorMsg
++from team.config import CAPITAL
++from round2.strategies import STRATEGIES
++from team.alpha.core import Intent
++from round2.features import FullObservation as Observation
++from round2.features import FullEvent as PublicEvent
++from alpha_lab.exchange import OfflineExchange, Receiver
++from round2.gateway import Gateway
++from alpha_lab.baselines import NoTrade, BuyHold, Original
++from round2.baselines import ActiveOriginal
++from alpha_lab.metrics import summarize
++
++UNIVERSE=('AAPL','NVDA','NFLX','AMD')
++BASELINES={'no_trade':NoTrade,'buy_hold':BuyHold}
++_RAW_INNOVATION=defaults.fundamental_innovation
++
++@lru_cache(maxsize=40000)
++def cached_innovation(symbol,tick,sigma,mu,seed,vol):
++    return _RAW_INNOVATION(symbol,tick,sigma,mu)
++
++def memo_innovation(symbol,tick,sigma,mu=0.):
++    return cached_innovation(symbol,tick,sigma,mu,defaults.FUNDAMENTAL_SEED,defaults.FUNDAMENTAL_VOL)
++
++
++OBSERVER=None
++
++def default_cash():return float(CAPITAL.get('6_rings_trader_1',cfg.INITIAL_CASH))
++
++
++@contextmanager
++def isolated(seed,week,cash,n,fee=.003,stress='base'):
++    saved={k:deepcopy(v) for k,v in vars(cfg).items() if k.isupper() and isinstance(v,(str,int,float,bool,dict,set,tuple,list))}
++    saved_cache=deepcopy(cfg._roster_cache); saved_persist=persistence.SEASON_PATH
++    saved_fund=(defaults.FUNDAMENTAL_SEED,defaults.FUNDAMENTAL_VOL)
++    saved_innovation=defaults.fundamental_innovation
++    defaults.fundamental_innovation=memo_innovation
++    saved_rng=random.getstate(); saved_env=dict(os.environ)
++    log_level=logging.root.manager.disable
++    import trader.config as tc
++    saved_team=tc.TEAM_ID
++    import trader.trader as trader_engine
++    saved_quiet=trader_engine._console.quiet
++    trader_engine._console.quiet=True
++    with tempfile.TemporaryDirectory(prefix='algoarena_alpha_') as tmp:
++        try:
++            os.environ.pop('GAME_WEEK',None);os.environ.pop('SCENARIO_PATH',None)
++            os.environ['REPORTS_DIR']=tmp
++            cfg.RECORD_SESSIONS=False;cfg.SEASON_PERSIST='false'
++            cfg.LATENCY_MS_DEFAULT=cfg.LATENCY_MS_COLOCATED=0.
++            cfg.TAKER_FEE_RATE=fee;cfg._TAKER_FEE_FROM_ENV=True;cfg._MAKER_REBATE_FROM_ENV=True
++            cfg.QUEUE_FEEDBACK_ENABLED=False;cfg.LATENCY_STATS_ENABLED=False
++            cfg.ROSTER_PATH=str(Path(tmp)/'roster.json')
++            accounts=[f'alpha_{i}' for i in range(n)]
++            # Same per-team grant fraction as the configured three live seats.
++            # Split 6 endowed shares across combined sleeves instead of multiplying it.
++            all_seats=accounts+[f'inactive_{i}' for i in range(3*n-n)]
++            roster={'research':{'traders':all_seats,'capital':{a:cash/n for a in accounts}},
++                    'liquidity':{'brokers':['liquidity'],'capital':{'liquidity':1e9}},
++                    'flow':{'traders':['flow'],'capital':{'flow':1e9}}}
++            for symbol in UNIVERSE+('ARENA10',):
++                name='liquidity_'+symbol
++                roster[name]={'brokers':[name],'capital':{name:1e9}}
++            Path(cfg.ROSTER_PATH).write_text(json.dumps(roster))
++            cfg._roster_cache={'key':None,'data':{}}
++            persistence.SEASON_PATH=str(Path(tmp)/'season.json')
++            defaults.FUNDAMENTAL_SEED=f'alpha:{seed}'
++            defaults.FUNDAMENTAL_VOL=(.5,1.,2.,4.)[seed%4]*(2 if stress=='volatile' else 1)
++            random.seed(seed)
++            scenario=load_week(week);scenario.apply()
++            if stress in ('volatile','reverse_shocks'):
++                for event in scenario.events:
++                    if 'magnitude_range' in event:
++                        event['magnitude_range']=[x*(1.5 if stress=='volatile' else 1.) for x in event['magnitude_range']]
++                        if stress=='reverse_shocks':event['direction']='down'
++            logging.disable(logging.CRITICAL)
++            yield Path(tmp),scenario,accounts
++        finally:
++            for key,value in saved.items():setattr(cfg,key,value)
++            cfg._roster_cache=saved_cache;persistence.SEASON_PATH=saved_persist
++            defaults.FUNDAMENTAL_SEED,defaults.FUNDAMENTAL_VOL=saved_fund
++            defaults.fundamental_innovation=saved_innovation
++            random.setstate(saved_rng);tc.TEAM_ID=saved_team
++            os.environ.clear();os.environ.update(saved_env)
++            trader_engine._console.quiet=saved_quiet
++            logging.disable(log_level)
++
++
++class MarketPopulation:
++    def __init__(self,server,seed,stress='base'):
++        self.server=server;self.rng=random.Random(seed+77191)
++        self.spread=(.0004,.0012,.003)[seed%3]*(2 if stress=='volatile' else 1)
++        self.ttl=(2,3,5)[seed%3];self.depth=(12,25,45)[seed%3]
++        self.informed=(.1,.35,.65)[seed%3]
++        self.ids={};self.last={};self.refs={}
++        self.symbols=UNIVERSE+(('ARENA10',) if server.scenario.flag('futures_enabled') else ())
++
++    async def refresh(self,force=False):
++        s=self.server
++        for sym in self.symbols:
++            if not s.session_open and s.auction_phase!='preopen':continue
++            if s.circuit_breaker.is_halted(sym):continue
++            if not force and s.tick-self.last.get(sym,-999)<self.ttl:continue
++            # Actual cancel/order requests, not a synthetic touch fill rule.
++            account='liquidity_'+sym
++            for oid in self.ids.get(sym,[]):
++                await s._handle_cancel_order(account,CancelOrder(team_id=account,symbol=sym,order_id=oid),account)
++            before=set(s.books[sym]._orders)
++            ref=s.ref_prices[sym]
++            for level in range(2):
++                width=self.spread/2*(1+level)
++                for side,price in [('buy',ref*(1-width)),('sell',ref*(1+width))]:
++                    qty=self.depth*(level+1)
++                    await s._handle_place_order(account,PlaceOrder(team_id=account,symbol=sym,
++                        side=side,quantity=qty,price=round(price,2),order_type='post_only'),account)
++            self.ids[sym]=[oid for oid,e in s.books[sym]._orders.items() if oid not in before and e.team_id==account]
++            self.last[sym]=s.tick
++
++    async def flow(self):
++        s=self.server
++        for sym in self.symbols:
++            if not s.session_open or s.circuit_breaker.is_halted(sym):continue
++            ref=s.ref_prices[sym];previous=self.refs.get(sym,ref);self.refs[sym]=ref
++            if self.rng.random()>.55:continue
++            change=ref/previous-1
++            probability=.5+self.informed*max(-.45,min(.45,change*80))
++            side='buy' if self.rng.random()<probability else 'sell'
++            snap=s.books[sym].get_snapshot();levels=snap['asks' if side=='buy' else 'bids']
++            if not levels:continue
++            price=levels[0][0]*(1.001 if side=='buy' else .999)
++            await s._handle_place_order('flow',PlaceOrder(team_id='flow',symbol=sym,side=side,
++                quantity=self.rng.randint(1,18),price=round(price,2),order_type='ioc'),'flow')
++
++
++def public_events(raw):
++    result=[]
++    for e in raw:
++        d=e.data or {};affected=d.get('affected') or ([d['symbol']] if d.get('symbol') else [])
++        result.append(PublicEvent(e.event,int(d.get('tick',0)),tuple(affected),str(d.get('kind','')),float(d.get('pct') or 0.),int(d.get('ramp_ticks') or 15),float(d.get('overshoot') or 1.3)))
++    return tuple(result)
++
++
++async def run_one(seed,components,ticks=1500,week=5,cash=None,stress='base',keep_curve=False):
++    cash=default_cash() if cash is None else cash
++    n=len(components);fee=.006 if stress=='fees_60bps' else .003
++    with isolated(seed,week,cash,n,fee,stress) as (tmp,scenario,accounts):
++        virtual=[1700000000.]
++        with patch('time.time',lambda:virtual[0]):
++            s=OfflineExchange();s.trade_log=[];s.set_scenario(scenario)
++            s.registry.reset_tick()
++            for sym,entry in s.registry.securities.items():
++                base=entry['defn'].base_price;entry['current_price']=base;s.registry.prices[sym]=base
++                s.ref_prices[sym]=base
++                if sym in s.price_engines:
++                    engine=s.price_engines[sym]
++                    engine.fair_value=engine.market_price=engine.session_open=base
++                    engine.impact_buffer=0.;engine.price_history.clear()
++            background_errors={}
++            def background_receive(msg):
++                if isinstance(msg,ErrorMsg):background_errors[msg.code]=background_errors.get(msg.code,0)+1
++            for name,role in [('liquidity','broker'),('flow','trader')]+[('liquidity_'+sym,'broker') for sym in UNIVERSE+('ARENA10',)]:
++                s.portfolios[name]=Portfolio(team_id=name,role=role,level=1,cash=1e9)
++                s.clients[name]=name
++                s.receivers[name]=background_receive
++            receivers=[];gateways=[];strategies=[]
++            for account,(name,params) in zip(accounts,components):
++                role='broker' if name=='market_making' else 'trader'
++                s.portfolios[account]=Portfolio(team_id=account,role=role,level=1,cash=cash/n)
++                s.clients[account]=account
++                rx=Receiver(account);rx.current=s
++                cap=max(1,(20 if name=='market_making' else 150)//n)
++                gateway=Gateway(s,account,rx,cash/n,cap,latency=3 if stress=='latency_3ticks' else 1)
++                strategy=((ActiveOriginal if name=='original_active' else Original)(account,tmp/(account+'.json'),s) if name in ('original','original_active') else
++                    BASELINES[name]() if name in BASELINES else STRATEGIES[name](**params))
++                if name in ('original','original_active'):
++                    base_receiver=rx
++                    def receive(msg,receiver=base_receiver,original=strategy):
++                        from shared.messages import TradeExecution
++                        receiver(msg)
++                        if isinstance(msg,TradeExecution):original.on_fill(msg)
++                    s.receivers[account]=receive
++                else:
++                    def receive_strategy(msg,receiver=rx,policy=strategy,a=account):
++                        from shared.messages import TradeExecution
++                        receiver(msg)
++                        if isinstance(msg,TradeExecution) and hasattr(policy,'on_fill'):policy.on_fill(msg,a,s.tick)
++                    s.receivers[account]=receive_strategy
++                receivers.append(rx);gateways.append(gateway);strategies.append(strategy)
++            population=MarketPopulation(s,seed,stress)
++            await s.open_session()
++            # Real opening auction and grants, but strategies deliberately wait for continuous trading.
++            while s.auction_phase=='preopen':
++                await population.refresh(force=True)
++                virtual[0]+=1;await s.advance_tick()
++            initial=sum(s.portfolios[a].net_worth(s.ref_prices,s._bidask_marks()) for a in accounts)
++            starting_positions={sym:sum(s.portfolios[a].positions.get(sym,0) for a in accounts) for sym in s.books}
++            starting_marks=dict(s.ref_prices)
++            starting_per_account={a:dict(s.portfolios[a].positions) for a in accounts}
++            curve=[];max_team=0;team_violations=0;halts=0;resumes=0
++            trade_cursor=len(s.trade_log)
++            for step in range(ticks):
++                virtual[0]+=1
++                await s.advance_tick();await s.resume_due()
++                await population.refresh()
++                for gateway in gateways:await gateway.execute_due(s.tick)
++                await population.flow()
++                s._score_markouts(virtual[0])
++                flow_qty={}
++                for trade in s.trade_log[trade_cursor:]:
++                    signed,total=flow_qty.get(trade.symbol,(0,0));flow_qty[trade.symbol]=(signed+trade.quantity*(1 if trade.aggressor=='buy' else -1),total+trade.quantity)
++                trade_cursor=len(s.trade_log)
++                trade_flow={sym:signed/max(1,total) for sym,(signed,total) in flow_qty.items()}
++                quotes={sym:q for sym in population.symbols if (q:=gateways[0].quote(sym))}
++                halted=frozenset(s.circuit_breaker.halted)
++                for account,strategy,rx,gateway in zip(accounts,strategies,receivers,gateways):
++                    p=s.portfolios[account]
++                    raw=rx.events;rx.events=[]
++                    events=public_events(raw)
++                    # Events that omit their tick are stamped at actual observation.
++                    events=tuple(replace(e,tick=e.tick or s.tick) for e in events)
++                    halts+=sum(e.event=='TRADING_HALT' for e in events)
++                    resumes+=sum(e.event=='TRADING_RESUMED' for e in events)
++                    obs=Observation(s.tick,quotes,dict(p.positions),p.cash,
++                        p.net_worth(s.ref_prices,s._bidask_marks()),cash/n,halted,
++                        s.circuit_breaker.market_halted,s.session_open,events,cfg.TAKER_FEE_RATE,
++                        cfg.MAKER_REBATE_RATE,scenario.flag('futures_enabled'),gateway.cap,trade_flow=trade_flow)
++                    if OBSERVER is not None: OBSERVER(obs,raw,account,s)
++                    if step>=ticks-12 and components[accounts.index(account)][0] not in BASELINES:
++                        intents=[]
++                        for sym in population.symbols:
++                            if sym in quotes and sym not in halted:
++                                intents.append(Intent(sym,'buy',0,0,cancel=True))
++                                intents+=StrategyCross(obs,sym,starting_per_account[account].get(sym,0))
++                    elif isinstance(strategy,Original):
++                        intents=await strategy.observe_async(obs,raw,rx.pending)
++                    else:intents=strategy.observe(obs)
++                    gateway.schedule(intents,obs)
++                    gateway.sample_risk()
++                for sym in s.books:
++                    lo=hi=sum(s.portfolios[a].positions.get(sym,0) for a in accounts)
++                    for rx in receivers:
++                        for e in rx.pending.values():
++                            if e.symbol==sym:
++                                if e.side=='buy':hi+=e.quantity
++                                else:lo-=e.quantity
++                    worst=max(abs(lo),abs(hi));max_team=max(max_team,worst)
++                    if worst>scenario.position_limit:team_violations+=1
++                curve.append(sum(s.portfolios[a].net_worth(s.ref_prices,s._bidask_marks()) for a in accounts))
++            result=summarize(s,accounts,receivers,gateways,curve,initial,starting_positions,starting_marks)
++            result.update({'seed':seed,'week':week,'stress':stress,'ticks':ticks,
++                'components':components,'cash':cash,'taker_fee':fee,'maker_rebate_rate':cfg.MAKER_REBATE_RATE,
++                'max_aggregate_gross':max((g.aggregate_gross for g in gateways),default=0.),'background_errors':background_errors,'spread_bps':population.spread*10000,'quote_ttl':population.ttl,
++                'volatility_multiplier':defaults.FUNDAMENTAL_VOL,
++                'max_team_position':max_team,'team_position_violations':team_violations,
++                'halts':halts//n,'resumes':resumes//n,
++                'open_overlay_shares':sum(abs(s.portfolios[a].positions.get(sym,0)-starting_per_account[a].get(sym,0))
++                    for a in accounts for sym in s.books),
++                'availability':'disabled_by_week_gate' if all(name=='basket' for name,_ in components) and not scenario.flag('futures_enabled') else 'enabled'})
++            if keep_curve:
++                result['equity_curve']=curve;result['fill_details']=[f for r in receivers for f in r.fills]
++            # No close_session persistence/report writes; any timer is virtual and holds no asyncio task.
++            return result
++
++
++def StrategyCross(obs,sym,target):
++    from team.alpha.core import Strategy
++    return Strategy.cross(obs,sym,target,'end_of_test_unwind')
+diff --git a/round2/strategies.py b/round2/strategies.py
+new file mode 100644
+--- /dev/null
++++ b/round2/strategies.py
+@@ -0,0 +1,98 @@
++"""Three new model policies: event-state prediction, cross-asset prediction,
++and a coordinated allocator of the validated predictors. No maker rebates.
++"""
++from pathlib import Path
++import json,math
++from collections import defaultdict
++import numpy as np
++from team.alpha import STRATEGIES as ROUND1
++from team.alpha.core import Strategy,Intent
++from round2.features import FeatureStore
++from round2.models import predict,entry_mask,I
++MODEL_PATH=Path(__file__).resolve().parent/'results/models_discovery.json'
++
++class PredictivePolicy(Strategy):
++    def __init__(self,family='event_regime',safety=.001,size_mode='adaptive',stop=.018,models=None,max_entries=None,uncertainty=True,**kwargs):
++        super().__init__();self.family=family;self.safety=safety;self.size_mode=size_mode;self.stop=stop
++        self.max_entries=max_entries;self.uncertainty=uncertainty
++        self.models=models or json.loads(MODEL_PATH.read_text());self.features=FeatureStore();self.base=None;self.plans={};self.completed=set();self.account=None;self.metrics=defaultdict(int)
++    def forecasts(self,v):
++        names=['event_regime','cross_asset'] if self.family=='adaptive_allocator' else [self.family]
++        selected=[]
++        for name in names:
++            m=self.models[name]
++            if not m.get('supported_proxy',False) or not entry_mask(v,name):continue
++            value=float(predict(v,m));uncertainty=m['train_rmse']/math.sqrt(40) if self.uncertainty else 0.
++            selected.append((value-uncertainty,m['horizon'],name))
++        if not selected:return None
++        # The allocator uses consensus when both predict: no summing correlated alphas.
++        if len(selected)>1:return (sum(x[0] for x in selected)/len(selected),max(x[1] for x in selected),'consensus')
++        return selected[0]
++    def on_fill(self,msg,account,tick=None):
++        self.account=account
++        sym=msg.symbol;p=self.plans.get(sym)
++        if p is None:return
++        if msg.buyer_id==account:
++            q=msg.quantity;p['entry_notional']+=q*msg.price;p['entry_qty']+=q
++            p['entry']=p['entry_notional']/p['entry_qty']
++            if p['started'] is None:p['started']=tick if tick is not None else p['last_tick']+1
++    def observe(self,obs):
++        if self.base is None:self.base=dict(obs.positions)
++        current=self.features.update(obs);intents=[];candidates=[]
++        for sym,v in current.items():
++            if sym=='ARENA10' or not self.eligible(obs,sym):continue
++            q=obs.quotes[sym];pos=obs.positions.get(sym,0);base=self.base.get(sym,0);plan=self.plans.get(sym)
++            forecast=self.forecasts(v)
++            if plan:
++                plan['last_tick']=obs.tick
++                actual=pos-base
++                plan['best']=max(plan['best'],q.bid)
++                if plan['entry']:
++                    net_loss=q.bid*(1-obs.taker_fee)/(plan['entry']*(1+obs.taker_fee))-1
++                    if net_loss < -self.stop:plan['exit']=True;self.metrics['stops']+=1
++                if plan['started'] is not None and obs.tick-plan['started']>=plan['holding']:plan['exit']=True
++                # Holding compares incremental future exit value; entry fees are sunk.
++                if not forecast and v[I['age']]>max(20,plan['holding']):plan['exit']=True
++                elif forecast and forecast[0]+2*.003+q.spread<.001:plan['exit']=True
++                if obs.tick-plan['created']>6 and actual==0:plan['exit']=True
++                target=base if plan['exit'] else plan['target']
++                if plan['exit'] and pos==base:
++                    del self.plans[sym];continue
++                target=max(0,target)
++                delta=target-pos
++                if delta:
++                    side='buy' if delta>0 else 'sell'
++                    budget=min(.015,max(.001,abs(v[I['r1']])*2,q.spread,abs(v[I['pct']])*1.3/15))
++                    price=q.ask*(1+budget) if side=='buy' else q.bid*(1-budget)
++                    intents.append(Intent(sym,side,min(60,abs(delta)),round(price,2),reason='model_exit' if plan['exit'] else 'model_entry'))
++                continue
++            if forecast is None:continue
++            edge,horizon,source=forecast
++            # Predictions are already after 30bp fees at both future touches.
++            edge-=2*(obs.taker_fee-.003)
++            key=(sym,self.features.news.get(sym,(-10000,))[0],source)
++            if key in self.completed or edge<=self.safety:continue
++            # Expected-value / volatility sizing, capped below the original's
++            # 25%-of-equity per-name rule; gateway preserves global risk budgets.
++            risk=max(.005,v[I['vol30']]*math.sqrt(horizon))
++            notional=min(.20*obs.initial_cash,.025*obs.initial_cash*(edge-self.safety)/(.006+risk))
++            quantity=8 if self.size_mode=='fixed8' else min(60,max(1,int(notional/q.ask)))
++            quantity=min(quantity,max(0,obs.cap-base))
++            if quantity:candidates.append((edge/max(risk,.005),sym,base+quantity,horizon,key,edge))
++        for _,sym,target,horizon,key,edge in sorted(candidates,reverse=True)[:(self.max_entries or (3 if self.family=='adaptive_allocator' else 1))]:
++            self.completed.add(key);q=obs.quotes[sym];v=current[sym]
++            self.plans[sym]=dict(created=obs.tick,last_tick=obs.tick,started=None,holding=horizon,target=target,exit=False,entry=0.,entry_qty=0,entry_notional=0.,best=q.bid)
++            budget=min(.015,max(.001,abs(v[I['r1']])*2,q.spread,abs(v[I['pct']])*1.3/15))
++            intents.append(Intent(sym,'buy',min(60,max(0,target-obs.positions.get(sym,0))),round(q.ask*(1+budget),2),reason='validated_prediction'))
++            self.metrics['entries']+=1
++        return [i for i in intents if i.quantity>0]
++
++class EventRegime(PredictivePolicy):
++    def __init__(self,**kwargs):super().__init__(family='event_regime',**kwargs)
++class CrossAsset(PredictivePolicy):
++    def __init__(self,**kwargs):super().__init__(family='cross_asset',**kwargs)
++class AdaptiveAllocator(PredictivePolicy):
++    def __init__(self,**kwargs):super().__init__(family='adaptive_allocator',**kwargs)
++class OvershootResearch(PredictivePolicy):
++    def __init__(self,**kwargs):super().__init__(family='overshoot_reversal',**kwargs)
++STRATEGIES={**ROUND1,'event_regime':EventRegime,'cross_asset':CrossAsset,'adaptive_allocator':AdaptiveAllocator,'overshoot_research':OvershootResearch}
+diff --git a/round2/tests/test_labels_review.py b/round2/tests/test_labels_review.py
+new file mode 100644
+--- /dev/null
++++ b/round2/tests/test_labels_review.py
+@@ -0,0 +1,28 @@
++from round2.bootstrap import ROOT
++import numpy as np
++from round2.labels_review import labels_with_halts
++
++def prices():
++    a=np.zeros((6,6));a[:,0]=np.arange(6);a[:,2:5]=100.
++    return a
++
++def test_intermediate_halt_does_not_select_out_a_loss():
++    a=prices();a[2,5]=1;a[3,2:5]=80.
++    _,long,_,stats=labels_with_halts(a,3)
++    assert long[0]<-.2 and stats['delayed_exits']==0
++
++def test_exit_waits_for_resume_and_charges_both_fees():
++    a=prices();a[3:5,5]=1;a[5,2:5]=75.
++    _,long,_,stats=labels_with_halts(a,3)
++    assert abs(long[0]-(75*.997/(100*1.003)-1))<1e-12
++    assert stats['delayed_exits']>=1
++
++def test_rejected_arrival_is_zero_not_dropped():
++    a=prices();a[1,5]=1
++    _,long,_,stats=labels_with_halts(a,3)
++    assert long[0]==0 and stats['entry_rejected']==1
++
++def test_terminal_halt_is_explicitly_censored():
++    a=prices();a[3:,5]=1
++    _,long,_,stats=labels_with_halts(a,3)
++    assert np.isnan(long[0]) and stats['terminal_censored']>0
+diff --git a/round2/tests/test_round2.py b/round2/tests/test_round2.py
+new file mode 100644
+--- /dev/null
++++ b/round2/tests/test_round2.py
+@@ -0,0 +1,61 @@
++from round2.bootstrap import ROOT
++import numpy as np
++from types import SimpleNamespace as NS
++from round2.features import FeatureStore,FullObservation,FullEvent,FEATURES,labels
++from round2.models import I,design
++from round2.strategies import EventRegime,AdaptiveAllocator
++from team.alpha.core import Quote
++
++def obs(t,price=100.,events=(),halted=frozenset(),pos=6):
++    return FullObservation(t,{'AAPL':Quote(price-.05,price+.05,10,10)},{'AAPL':pos},175000.,192000.,175000.,halted,False,True,events)
++def model(family,value=.03):
++    n=design(np.zeros(len(FEATURES)),family).shape[-1]
++    return dict(family=family,horizon=20,mean=[0.]*n,scale=[1.]*n,beta=[value]+[0.]*n,train_rmse=0.,supported_proxy=True)
++def test_lag_features_and_publication_time():
++    f=FeatureStore()
++    for t in range(1,10):f.update(obs(t,100.+t))
++    assert f.current['AAPL'][I['ann_remaining']]==0.
++    event=FullEvent('CALENDAR_EVENT',10,('AAPL',),'earnings',.1,15,1.3)
++    v=f.update(obs(10,110.,(event,)))['AAPL'].copy()
++    assert abs(v[I['r3']]-(110/107-1))<1e-12
++    assert abs(v[I['ann_remaining']]-(109*1.1/110-1))<1e-12
++    f.update(obs(11,100000.))
++    assert abs(v[I['ann_remaining']]-(109*1.1/110-1))<1e-12
++
++def test_labels_enter_on_later_tick_and_include_both_fees():
++    a=np.zeros((4,6+len(FEATURES)));a[:,0]=np.arange(4);a[:,2]=[90,100,104,105];a[:,3]=[89,99,103,104];a[:,4]=[91,101,105,106]
++    _,long,_=labels(a,3)
++    assert abs(long[0]-(104*.997/(101*1.003)-1))<1e-12
++    a[2,5]=1;assert np.isnan(labels(a,3)[1][0])
++
++def test_halt_blocks_new_orders():
++    p=EventRegime(models={'event_regime':model('event_regime')})
++    e=FullEvent('CALENDAR_EVENT',10,('AAPL',),'earnings',.1)
++    assert p.observe(obs(10,events=(e,),halted=frozenset({'AAPL'})))==[]
++
++def test_requests_are_ioc_and_capped_and_volatility_reduces_size():
++    amounts=[]
++    for vol in [.001,.02]:
++        p=EventRegime(models={'event_regime':model('event_regime')})
++        p.features.update=lambda o: {'AAPL':np.array([vol if n=='vol30' else .1 if n=='pct' else 1. if n=='age' else 0. for n in FEATURES])}
++        orders=p.observe(obs(10));amounts.append(orders[0].quantity)
++        assert all(o.order_type=='ioc' and 0<o.quantity<=60 for o in orders)
++        assert p.plans['AAPL']['target']<=150
++    assert amounts[1]<=amounts[0]
++
++def test_actual_partial_fills_determine_entry_vwap_and_clock():
++    p=EventRegime(models={'event_regime':model('event_regime')})
++    p.plans['AAPL']=dict(entry_notional=0.,entry_qty=0,entry=0.,started=None,last_tick=9)
++    for tick,px in [(10,101.),(11,103.)]:p.on_fill(NS(symbol='AAPL',buyer_id='a',quantity=2,price=px),'a',tick)
++    assert p.plans['AAPL']['entry']==102. and p.plans['AAPL']['started']==10
++
++def test_allocator_does_not_sum_correlated_forecasts():
++    p=AdaptiveAllocator(models={'event_regime':model('event_regime',.02),'cross_asset':model('cross_asset',.04)},uncertainty=False)
++    v=np.zeros(len(FEATURES));v[I['age']]=3;v[I['pct']]=.1;v[I['peer3']]=.01
++    assert abs(p.forecasts(v)[0]-.03)<1e-12
++
++def test_unsupported_family_cannot_manufacture_trade():
++    from round2.strategies import OvershootResearch
++    m=model('overshoot_reversal');m['supported_proxy']=False
++    p=OvershootResearch(models={'overshoot_reversal':m});v=np.zeros(len(FEATURES));v[I['age']]=20;v[I['pct']]=-.1;v[I['ann_remaining']]=.05
++    assert p.forecasts(v) is None
+diff --git a/round2/.gitignore b/round2/.gitignore
+new file mode 100644
+--- /dev/null
++++ b/round2/.gitignore
+@@ -0,0 +1,5 @@
++__pycache__/
++results/*.npz
++results/*.jsonl
++results/*.log
++mpl_cache/
+diff --git a/round2/FILES.md b/round2/FILES.md
+new file mode 100644
+--- /dev/null
++++ b/round2/FILES.md
+@@ -0,0 +1,25 @@
++# Round II preserved research and completion artifacts
++
++The primary deliverable is `../ROUND_II_REPORT.md`. `../ALPHA_DISCOVERY.md` points to the completed research verdict.
++
++Existing Round II strategy files, frozen model and selected parameters were preserved for the final test. `features.py` still contains the biased legacy training labels deliberately: changing them would obscure which model was actually selected and evaluated. Use `labels_review.py` for subsequent research. Do not describe the old support flags as valid statistical confidence.
++
++Completion additions:
++
++- `finish_experiments.py`: reduced cost/shock suite and historical completion; refuses output overwrites and resumes only unsaved historical combinations.
++- `labels_review.py`: corrected diagnostic labels with rejected entry, delayed exit and censor accounting.
++- `label_diagnostics.py`: diagnoses existing validation data without refitting.
++- `tests/test_labels_review.py`: four targeted label regressions.
++- `completion_report.py`: regenerates status, metrics, accounting decomposition, figures and reports from saved runs only.
++- `results/experiment_status.json`: completed/partial/deferred inventory, counts and hashes.
++- `results/test.jsonl`: actual 100-seed paired execution journals and equity paths.
++- `results/priority_stress.jsonl`: fixed 20-seed cost/shock stresses.
++- `results/historical_frozen.jsonl`: five preserved outputs from the interrupted historical batch.
++- `results/historical_remaining.jsonl`: ten previously unsaved combinations after fixture repair.
++- `results/verification.json`: risk, timing, provenance and rejection counters.
++- `results/oos_metrics.csv`, `priority_stress_metrics.csv`, `historical_metrics.csv`, `pnl_attribution.csv`: detailed measured outcomes.
++- `figures/`: before/after equity, drawdown, paired P&L and cost charts.
++
++`history_eval.py` was repaired to import the feature index from the correct module and preserve the real exchange's closed-session rejection for orders already in transport. No frozen synthetic trading code changed during test evaluation. The original historical fixture and its failed log remain intact.
++
++Large raw outputs are Git-ignored but preserved locally. `round2_changes.patch` includes reviewable Round II source, frozen models/protocol, result summaries and reports; it does not contain recording data, credentials or live-account state. Original project changes shown by Git predate this completion and are not included in that patch.
+diff --git a/ROUND_II_REPORT.md b/ROUND_II_REPORT.md
+new file mode 100644
+--- /dev/null
++++ b/ROUND_II_REPORT.md
+@@ -0,0 +1,251 @@
++# AlgoArena Alpha Discovery Round II — completion report
++
++No new strategy demonstrates a robust improvement over the active original bot. This is a retrospective research result, not a deployment recommendation or a guarantee of live returns. The original project and Round I audit are preserved.
++
++## What completed and what was preserved
++
++The resumed task inspected saved code, logs, 120 market-data collections (40 discovery seeds × two weeks, 20 validation seeds × two weeks), three historical feature datasets, two 400-run validation files, model grids and frozen-model hashes. Neither completed validation nor Round I experiments were rerun. Both validation files use the **same 20 seeds**; they are not 40 independent seeds. The separate stock-only refit exists but was not substituted for the frozen validated model.
++
++This completion saved **1895 additional exchange/replay runs**. Primary test seeds are **6000–6099**, separate from discovery 4000–4039, validation 4100–4119 and Round I seeds. Strategies, safety thresholds and model hashes were frozen before test execution. No test tuning occurred. Stress scope was reduced before results inspection to conserve usage. All testing used local isolated accounts; no hosted orders were submitted.
++
++| file | saved_runs | expected_runs | status |
++| --- | --- | --- | --- |
++| validation_development.jsonl | 400 | 400 | completed |
++| validation.jsonl | 400 | 400 | completed |
++| test.jsonl | 1400 | 1400 | completed |
++| priority_stress.jsonl | 480 | 480 | completed |
++| historical_frozen.jsonl | 5 | 15 | partial |
++| historical_remaining.jsonl | 10 | 10 | completed |
++
++The first historical batch stopped after five saved results because the V3 fixture asserted on an in-flight order arriving after session close. Its partial output and failure log are preserved. Only the ten missing combinations were resumed; the real exchange now rejects closed-session arrivals normally. The two historical files together constitute the planned 15 runs, not 20.
++
++The machine-readable [status manifest](round2/results/experiment_status.json) includes hashes, partial-output counts and deferred work. Raw `.jsonl` journals and `.npz` datasets remain on disk (ignored by Git to avoid enormous diffs).
++
++## Out-of-sample strategy ranking
++
++Dollar figures are means per **1500-tick scenario**, with $175,000 total starting cash plus endowed shares. Pooled estimates average Weeks 5 and 9 **within each seed**, then bootstrap independent seed clusters (10,000 resamples; 95% intervals). Weeks are not counted as independent extra seeds. Confidence intervals are descriptive, unadjusted for multiple strategies and conditional on this generator.
++
++| strategy | seeds | net_pnl | delta_original_active | low_original_active | high_original_active | delta_no_trade | fees | turnover | worst_drawdown_pct | liquidations | position_violations | team_violations |
++| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
++| original_active | 100 | 1,653.74 | 0.00 | 0.00 | 0.00 | 1,108.74 | 326.49 | 0.57 | 1.28 | 0 | 0 | 0 |
++| original | 100 | 1,300.97 | -352.77 | -409.57 | -296.56 | 755.97 | 192.66 | 0.33 | 1.28 | 0 | 0 | 0 |
++| adaptive_allocator | 100 | 1,234.66 | -419.08 | -501.86 | -333.16 | 689.65 | 156.28 | 0.27 | 0.83 | 0 | 0 | 0 |
++| event_regime | 100 | 1,217.86 | -435.88 | -515.27 | -354.31 | 672.85 | 164.55 | 0.29 | 0.83 | 0 | 0 | 0 |
++| round1_combined | 100 | 825.63 | -828.11 | -954.42 | -706.01 | 280.63 | -112.30 | 1.10 | 0.87 | 0 | 0 | 0 |
++| cross_asset | 100 | 576.53 | -1,077.21 | -1,226.30 | -934.46 | 31.53 | 29.42 | 0.05 | 0.68 | 0 | 0 | 0 |
++| no_trade | 100 | 545.01 | -1,108.74 | -1,262.64 | -961.31 | 0.00 | 0.00 | 0.00 | 0.68 | 0 | 0 | 0 |
++
++`original` preserves the exact frozen policy, including its Week 5 gate. `original_active` is the stricter comparator: the same original decision policy with the simulated venue clock supplied and the week gate enabled in both scenarios. This avoids claiming alpha merely by beating an inactive Week 9 bot. Both comparators are retained in the detailed CSV.
++
++| week | strategy | net_pnl | delta_original_active | low_original_active | high_original_active | delta_original | delta_round1_combined |
++| --- | --- | --- | --- | --- | --- | --- | --- |
++| 5 | adaptive_allocator | 1,529.83 | -543.95 | -672.97 | -414.92 | -543.95 | 695.01 |
++| 5 | cross_asset | 590.81 | -1,482.97 | -1,719.20 | -1,254.62 | -1,482.97 | -244.01 |
++| 5 | event_regime | 1,496.80 | -576.99 | -708.35 | -445.81 | -576.99 | 661.98 |
++| 5 | original | 2,073.78 | 0.00 | 0.00 | 0.00 | 0.00 | 1,238.97 |
++| 5 | original_active | 2,073.78 | 0.00 | 0.00 | 0.00 | 0.00 | 1,238.97 |
++| 5 | round1_combined | 834.82 | -1,238.97 | -1,445.81 | -1,041.89 | -1,238.97 | 0.00 |
++| 9 | adaptive_allocator | 939.49 | -294.21 | -374.82 | -210.24 | 411.33 | 123.04 |
++| 9 | cross_asset | 562.26 | -671.44 | -778.56 | -563.86 | 34.10 | -254.19 |
++| 9 | event_regime | 938.93 | -294.77 | -369.79 | -217.39 | 410.77 | 122.48 |
++| 9 | original | 528.16 | -705.54 | -817.97 | -592.76 | 0.00 | -288.29 |
++| 9 | original_active | 1,233.70 | 0.00 | 0.00 | 0.00 | 705.54 | 417.25 |
++| 9 | round1_combined | 816.45 | -417.25 | -511.15 | -319.44 | 288.29 | 0.00 |
++
++No-trade is endowed with shares and can earn positive MTM without any trading. Therefore account P&L alone is not alpha. Gross P&L adds back actual net execution fees; it is not a zero-cost counterfactual. Slippage/spread already affect fill prices and are not deducted twice. Detailed fees, rebates, slippage, fills, turnover, session-scaled Sharpe and exposure are in [oos_metrics.csv](round2/results/oos_metrics.csv). The original and new strategies have different target sizes within the same capital/risk envelope; a risk-normalized outperformance claim needs the deferred sizing ablation.
++
++## Transaction-cost and shock stresses
++
++These use the same preselected **20 seed IDs, 6000–6019**, in both weeks: they are robustness checks, not additional independent test seeds. `fees_60bps` doubles taker fees from 30 to 60 bps per side. `volatile` doubles fundamental volatility and background spreads and multiplies configured event magnitude ranges by 1.5. It is a joint stress and cannot isolate which change caused a loss.
++
++| stress | strategy | seeds | net_pnl | delta_original_active | low_original_active | high_original_active | delta_no_trade | fees | worst_drawdown_pct | liquidations | position_violations | team_violations |
++| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
++| fees_60bps | adaptive_allocator | 20 | 918.32 | -497.77 | -697.00 | -318.52 | 418.40 | 244.49 | 0.77 | 0 | 0 | 0 |
++| fees_60bps | cross_asset | 20 | 498.04 | -918.06 | -1,252.60 | -611.47 | -1.89 | 26.03 | 0.58 | 0 | 0 | 0 |
++| fees_60bps | event_regime | 20 | 908.79 | -507.30 | -716.32 | -318.09 | 408.87 | 269.67 | 0.77 | 0 | 0 | 0 |
++| fees_60bps | no_trade | 20 | 499.93 | -916.17 | -1,250.72 | -610.68 | 0.00 | 0.00 | 0.58 | 0 | 0 | 0 |
++| fees_60bps | original_active | 20 | 1,416.10 | 0.00 | 0.00 | 0.00 | 916.17 | 555.14 | 1.00 | 0 | 0 | 0 |
++| fees_60bps | round1_combined | 20 | 692.97 | -723.13 | -1,013.44 | -461.90 | 193.04 | -59.81 | 0.74 | 0 | 0 | 0 |
++| volatile | adaptive_allocator | 20 | 1,287.55 | -478.74 | -1,005.20 | -95.14 | 753.07 | 162.06 | 0.89 | 0 | 0 | 0 |
++| volatile | cross_asset | 20 | 552.04 | -1,214.25 | -1,919.62 | -713.48 | 17.57 | 38.23 | 0.90 | 0 | 0 | 0 |
++| volatile | event_regime | 20 | 1,280.89 | -485.40 | -1,003.91 | -122.40 | 746.41 | 177.24 | 0.89 | 0 | 0 | 0 |
++| volatile | no_trade | 20 | 534.48 | -1,231.81 | -1,953.43 | -711.81 | 0.00 | 0.00 | 0.75 | 0 | 0 | 0 |
++| volatile | original_active | 20 | 1,766.29 | 0.00 | 0.00 | 0.00 | 1,231.81 | 228.39 | 1.06 | 0 | 0 | 0 |
++| volatile | round1_combined | 20 | 756.72 | -1,009.56 | -1,654.29 | -539.75 | 222.25 | -82.12 | 0.98 | 0 | 0 | 0 |
++
++New policies submit IOC orders and do not depend on maker rebates. Round I combined includes market making and its rebates; report net fees accordingly. The unexecuted 50-seed/four-stress plan is **not** represented as completed. Execution-latency and quote-refresh robustness remain unverified for Round II.
++
++## Historical recordings
++
++| week | strategy | net_pnl | delta_original_active | delta_no_trade | fees | fills | worst_drawdown_pct | liquidations | position_violations |
++| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
++| 2 | adaptive_allocator | 1,055.78 | -1.10 | -1.69 | 1.85 | 4 | 0.27 | 0 | 0 |
++| 2 | cross_asset | 1,055.78 | -1.10 | -1.69 | 1.85 | 4 | 0.27 | 0 | 0 |
++| 2 | event_regime | 1,057.47 | 0.59 | 0.00 | 0.00 | 0 | 0.27 | 0 | 0 |
++| 2 | no_trade | 1,057.47 | 0.59 | 0.00 | 0.00 | 0 | 0.27 | 0 | 0 |
++| 2 | original_active | 1,056.88 | 0.00 | -0.59 | 6.84 | 10 | 0.27 | 0 | 0 |
++| 3 | adaptive_allocator | 777.98 | -30.97 | 0.00 | 0.00 | 0 | 0.16 | 0 | 0 |
++| 3 | cross_asset | 777.98 | -30.97 | 0.00 | 0.00 | 0 | 0.16 | 0 | 0 |
++| 3 | event_regime | 777.98 | -30.97 | 0.00 | 0.00 | 0 | 0.16 | 0 | 0 |
++| 3 | no_trade | 777.98 | -30.97 | 0.00 | 0.00 | 0 | 0.16 | 0 | 0 |
++| 3 | original_active | 808.95 | 0.00 | 30.97 | 13.48 | 18 | 0.16 | 0 | 0 |
++| 4 | adaptive_allocator | 380.16 | -19.50 | -20.69 | 5.92 | 15 | 0.23 | 0 | 0 |
++| 4 | cross_asset | 349.19 | -50.48 | -51.66 | 19.55 | 29 | 0.24 | 0 | 0 |
++| 4 | event_regime | 400.85 | 1.19 | 0.00 | 0.00 | 0 | 0.23 | 0 | 0 |
++| 4 | no_trade | 400.85 | 1.19 | 0.00 | 0.00 | 0 | 0.23 | 0 | 0 |
++| 4 | original_active | 399.66 | 0.00 | -1.19 | 43.93 | 28 | 0.23 | 0 | 0 |
++
++All available Week 2, 3 and 4 files match the saved recording inventory; no Week 5 historical tape exists in that inventory. These tapes were examined in Round I, so they are **retrospective transfer tests, not genuinely untouched historical holdouts**. Frozen synthetic models are replayed without fitting to these outcomes. Chronological historical refits were deferred. Public books are replayed into the actual matching engine, but a historical book recording does not reveal the counterfactual queue reaction to our orders. Refilled recorded depth and missing cancellations/queue state limit realism. Historical market making/combined replay is omitted rather than assuming valid maker fills. Three days are insufficient for credible historical confidence intervals.
++
++The event policy made **zero fills on all three recordings**: its positive historical account P&L is grant exposure, not event alpha. Cross-asset and allocator activity was negative relative to no-trade where they traded. The active original received one normal `SESSION_CLOSED` arrival rejection per tape; this is not a crash or a fill outside session hours. These sparse, low-participation results do not support transfer of synthetic alpha.
++
++## Sources of apparent alpha and implementation findings
++
++1. **Event state:** public calendar payloads expose direction/magnitude and shock-shape information. The event model predicts remaining repricing from the last pre-announcement mid, public target, observed momentum, phase and liquidity. This is causal access to simulator news, but it encodes a programmed price trajectory. The original already uses this information; rediscovering it is not an independent information advantage.
++2. **Cross-asset movement:** lagged peer returns and relative movement predict some synthetic continuations, especially around shared macro shocks. The same generator drives peers; this does not establish a market lead-lag relationship. Microprice, imbalance and trade-flow predictors are entangled with the synthetic background order generator. Its quote spread, refresh interval, depth and informed-flow strength all co-vary with `seed % 3`; these are bundled regimes rather than independently identified effects. Synthetic strategies see four stock books (AAPL, NVDA, NFLX, AMD); historical replay can expose ten, changing the peer-return feature distribution.
++3. **Reversal:** the overshoot reversal model has only one qualifying validation opportunity/seed and is disabled. There are only two provisionally supported independent predictors. The third implemented strategy is an allocator of those two, averaging correlated forecasts rather than adding them. It is not a manufactured third alpha.
++4. **High severity — `round2/features.py:labels`:** the frozen training screen removes opportunities if a future halt occurs between entry and exit. That is future-outcome selection. Signal-screen returns and model-support flags are therefore biased and cannot establish statistical alpha. The execution tests do not drop those paths: orders encounter actual halts and account MTM includes adverse moves. Thus the untouched direct execution comparison still honestly evaluates the frozen policy, including any consequences of poor training.
++5. **Corrected implementation preserved separately:** `round2/labels_review.py:labels_with_halts` records rejected arrivals as zero payoff, retains intermediate halts, delays exits to the first tradable quote, and explicitly counts terminal censoring. Four regression tests cover these cases. It has **not** been used to refit the evaluated policy; no improved-profit claim follows from the fix.
++6. **Other limitations:** frozen model fitting included ARENA10 samples although the new policies trade stocks only; `models_stockonly.json` is an untested alternative. The uncertainty deduction `RMSE/sqrt(40)` is a heuristic, not a valid prediction interval. Grid/feature searches share validation data; existing conditional-return intervals do not correct selection. Missing two-sided quotes limit label coverage. These are reasons to reject model-confidence claims, even when execution P&L is measured correctly.
++7. **Historical adapter repair:** the saved `history_eval.py` imported `I` from the wrong module. This completion fixes that import and the historical fixture's decision-time/arrival-time assertion (by retaining actual exchange session/auction rejection); frozen synthetic trading code and model hashes stay unchanged. Original clock/session gating, execution callbacks and historical phase handling remain explicit in the adapter.
++
++Validation-only label diagnostics below use the **same frozen prediction threshold**, equities only, every third tick. These are overlapping quote-touch opportunities, **not independent trades, execution results or new confidence intervals**. Correcting selection need not reduce the mean; the sign of the bias is empirical. This diagnostic performs no refit and does not change OOS policies. Full rows are in `label_selection_diagnostics.csv`.
++
++| family | old_labels | corrected_labels | old_mean_bps | corrected_mean_bps |
++| --- | --- | --- | --- | --- |
++| cross_asset | 36 | 91 | 44.74 | 47.86 |
++| event_regime | 83 | 261 | 153.63 | 170.19 |
++| overshoot_reversal | 1 | 1 | 9.48 | 9.48 |
++
++## Where profit comes from
++
++The new policies buy selected positive expected repricing, use volatility-dependent sizes, and aim to exit after 10/20 ticks or a 1.8% stop. These are discrete-tick rules; halts/gaps can prevent the stop from executing at its threshold. They retain the initial grant during negative news, whereas the original can sell endowed inventory. The allocator can express more simultaneous opportunities, which also changes exposure. Additional P&L versus Round I, if shown above, is attributable to richer public-event information, entry timing and sizing together—not an isolated proof of a new predictor. Dollar performance versus no-trade separates grant drift, while the original comparison tests whether that package actually improves the incumbent.
++
++Exact terminal-account decomposition versus matched no-trade (means across both scenarios):
++
++| strategy | cash_difference | terminal_overlay_value | endowment_mark_difference | initial_equity_adjustment | net_excess_no_trade | max_accounting_residual |
++| --- | --- | --- | --- | --- | --- | --- |
++| adaptive_allocator | 641.30 | 48.36 | -0.01 | 0.00 | 689.65 | 0.00 |
++| cross_asset | 31.53 | 0.00 | -0.00 | 0.00 | 31.53 | 0.00 |
++| event_regime | 624.56 | 48.36 | -0.06 | 0.00 | 672.85 | 0.00 |
++| no_trade | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
++| original | 533.76 | 221.45 | 0.75 | 0.00 | 755.97 | 0.00 |
++| original_active | 887.25 | 220.90 | 0.58 | 0.00 | 1,108.74 | 0.00 |
++| round1_combined | 278.73 | 0.32 | 1.57 | 0.00 | 280.63 | 0.00 |
++
++Cash differences include executed costs and other cash flows. Terminal overlay value is the extra inventory marked at each candidate's own terminal venue mark. Endowment mark difference captures changes in valuation of granted shares caused by candidate-dependent market paths. These components sum to paired net P&L after the initial-equity adjustment; they do not imply guaranteed liquidation proceeds.
++
++## Execution and risk boundaries
++
++Orders are scheduled at decision time, reserve exposure, and reach the real local matching handler at least one tick later. Wire quantities are frozen in transit. Actual fills, partial fills, commissions/rebates and rejections determine accounts. Halts block decisions; an in-flight order may be rejected on arrival. The observed violation counts above are empirical outcomes, not a mathematical guarantee against every exchange race.
++
++Saved verification counters (including every completed stress and historical row):
++
++```json
++{
++  "test": {
++    "runs": 1400,
++    "same_tick_fills": 0,
++    "missing_fill_provenance": 0,
++    "liquidations": 0,
++    "position_violations": 0,
++    "team_position_violations": 0,
++    "rejection_codes": {
++      "SYMBOL_HALTED": 255,
++      "ORDER_NOT_FOUND": 62046,
++      "POST_ONLY_CROSS": 514,
++      "STP_CANCEL": 4
++    }
++  },
++  "priority_stress": {
++    "runs": 480,
++    "same_tick_fills": 0,
++    "missing_fill_provenance": 0,
++    "liquidations": 0,
++    "position_violations": 0,
++    "team_position_violations": 0,
++    "rejection_codes": {
++      "SYMBOL_HALTED": 118,
++      "ORDER_NOT_FOUND": 23106,
++      "POST_ONLY_CROSS": 229
++    }
++  },
++  "historical": {
++    "runs": 15,
++    "same_tick_fills": 0,
++    "missing_fill_provenance": 0,
++    "liquidations": 0,
++    "position_violations": 0,
++    "team_position_violations": 0,
++    "rejection_codes": {
++      "SESSION_CLOSED": 3
++    }
++  },
++  "test_rejections_by_strategy": {
++    "adaptive_allocator": {
++      "SYMBOL_HALTED": 31
++    },
++    "cross_asset": {
++      "SYMBOL_HALTED": 20
++    },
++    "event_regime": {
++      "SYMBOL_HALTED": 8
++    },
++    "no_trade": {},
++    "original": {
++      "SYMBOL_HALTED": 71
++    },
++    "original_active": {
++      "SYMBOL_HALTED": 82
++    },
++    "round1_combined": {
++      "SYMBOL_HALTED": 43,
++      "ORDER_NOT_FOUND": 62046,
++      "POST_ONLY_CROSS": 514,
++      "STP_CANCEL": 4
++    }
++  },
++  "new_strategy_maker_rebates": 0.0,
++  "test_unique_keys": 1400
++}
++```
++
++The large `ORDER_NOT_FOUND` count belongs to Round I combined's cancel/replace behavior, not the new IOC policies. It is a measured operational weakness even though it did not breach position limits here. The new policies' only test rejection code was `SYMBOL_HALTED`, consistent with an order crossing a halt boundary while in transport.
++
++Each experiment shares one $175,000 total budget; Round I combined splits it across two sleeves. The conservative gateway caps at 150 stock shares per single sleeve, reserves pending buys/sells, forbids stock shorts, limits entry gross to min(40% starting cash, $70,000), reserves 60% starting cash, and stops adding risk below 70% starting-cash equity. Independent sleeve budgets are conservative relative to the venue team limit; the study also samples aggregate positions plus pending orders. Price changes can move gross exposure above an entry limit without a new order. There is no live multi-process reconnection/ACK-race certification in this research.
++
++New requests are at most 60 shares; model notional targets are capped at 20% starting cash, and the gateway can reduce them further. Forced final-window unwind attempts are shared across active strategies; a halted position can remain open and is valued using venue MTM. No depth-swept guaranteed cash exit is assumed. Session Sharpe is not annualized and is not an iid significance statistic.
++
++## Actionable improvements, in priority order
++
++1. **Keep the incumbent until a paired improvement is demonstrated.** Use `original_active` as the research comparator; do not replace the live bot with a model merely because gross or no-trade-relative P&L is positive.
++2. **Repair training selection before more optimization.** Use `labels_review.py`, keep reject/delay/censor flags, quantify missing-book coverage, and fit stocks only. A new discovery/validation cycle and new sealed seeds are required; 6000–6099 are now spent evaluation data.
++3. **Model execution value rather than unconditional touch returns.** Estimate fill probability, fee-adjusted realized markouts and halt-delayed exits from order journals. Replace the heuristic uncertainty haircut with seed/day-block validation and conservative prediction errors.
++4. **Isolate event information from exposure.** Compare equal-size original versus event model, remove public shock-shape fields, remove peer features, and separately test grant de-risking on negative news. These are hypotheses, not verified profit improvements; the deferred ablations are necessary.
++5. **Demand independent market evidence.** Acquire future untouched recordings and evaluate chronology, realistic latency, depth depletion and no-rebate performance. Do not optimize against a single programmed shock ramp and call it robust alpha.
++
++## Artifacts and reproduction
++
++Charts use saved OOS equity paths without rerunning experiments:
++
++![Mean equity and drawdown](round2/figures/equity_drawdown.png)
++
++![Paired increments and costs](round2/figures/paired_pnl_costs.png)
++
++All new strategies are in `round2/strategies.py`; discovery/model code, frozen parameters, source hashes, raw journals and prior partial/development results remain in `round2/`. The original `.env`, live bot, previous audit and unrelated Git changes are preserved. Tests executed in this completion: **11 passed, 0 failed, 0 skipped**; `round2/results/completion_tests.xml`. Seven tests cover existing policy behavior, four cover corrected labels. This does not rerun or recertify the full project suite.
++
++```bash
++# Regenerate tables, manifest and report from saved runs (no experiments):
++.venv310/bin/python -m round2.completion_report
++# Targeted regressions:
++.venv310/bin/python -m pytest round2/tests/test_round2.py round2/tests/test_labels_review.py -q
++# Exact primary experiment invocation used (writes test.jsonl; use a separate copy to reproduce):
++.venv310/bin/python -m round2.experiments --stage test --workers 8
++# These completion commands refuse to overwrite an existing output:
++.venv310/bin/python -m round2.finish_experiments --stage stress --workers 4
++.venv310/bin/python -m round2.finish_experiments --stage history --workers 3
++# Resume only unsaved historical combinations from the preserved partial batch:
++.venv310/bin/python -m round2.finish_experiments --stage history_resume --workers 2
++```
++
++The frozen runner does not make its original full-stage CLI append-safe. Preserve outputs or use a separate repository copy before reproducing that command. The completion runner explicitly refuses overwrites. Existing parameter sensitivity (`model_sensitivity.csv`) and predictor screens (`signal_screens.csv`) are saved development evidence with the label-selection caveat above; they are not new held-out results. Additional large experiments were deliberately deferred under the user's usage constraint.
+diff --git a/ALPHA_DISCOVERY.md b/ALPHA_DISCOVERY.md
+new file mode 100644
+--- /dev/null
++++ b/ALPHA_DISCOVERY.md
+@@ -0,0 +1,15 @@
++# Alpha Discovery Round II
++
++**No new strategy robustly beats the original bot.** See [ROUND_II_REPORT.md](ROUND_II_REPORT.md) for full paired confidence intervals, costs, risk counters, charts and reproducibility.
++
++The strongest observed relationship is **remaining synthetic event repricing**: publicly announced magnitude, last pre-announcement mid and the observed phase of the programmed shock help predict subsequent prices. The original already consumes this event information. The event model and its allocator improve on Round I combined, but they do not outperform the incumbent on 100 untouched paired test seeds.
++
++**Peer returns** show some synthetic continuation around common macro shocks. Their separate strategy earns little beyond no-trade and loses that advantage under doubled taker fees. Shared shocks and bundled background spread/depth/refresh regimes confound a causal cross-asset interpretation. Microprice, imbalance and trade-flow features have not independently demonstrated incremental after-cost profitability.
++
++**Overshoot reversal is unsupported**: only one qualifying validation opportunity was found. It remains disabled. The third implemented strategy is an allocator of event and peer predictions, not a third independent alpha.
++
++The earlier label screen excluded opportunities encountering future halts. That selection invalidates its model-support confidence claims. A separate corrected diagnostic retains intermediate halts, scores rejected arrivals, delays exits and counts censoring; it was tested but not used to refit or tune the frozen policies. Correcting this selection does not necessarily lower a sample mean. Actual exchange OOS execution, including all halts, determines the final rankings.
++
++Across three previously inspected recordings, the event strategy never trades and the active new strategies lose relative to endowed no-trade. No untouched historical holdout is available. The synthetic event advantage has therefore not demonstrated empirical transfer.
++
++Research outputs and deferred work are recorded in [experiment_status.json](round2/results/experiment_status.json); [oos_metrics.csv](round2/results/oos_metrics.csv) ranks execution outcomes. Further model tuning requires a new development cycle and new sealed test seeds. Preserve the incumbent until that evidence exists.
+diff --git a/round2/results/frozen_models.json b/round2/results/frozen_models.json
+new file mode 100644
+--- /dev/null
++++ b/round2/results/frozen_models.json
+@@ -0,0 +1,254 @@
++{
++  "event_regime": {
++    "family": "event_regime",
++    "horizon": 20,
++    "ridge": 0.01,
++    "mean": [
++      0.0006087390559297304,
++      0.0015621879202504167,
++      0.004131248801533969,
++      1.3013059083182988e-05,
++      8.11156303493707e-05,
++      0.00027327770871292997,
++      1.3408468519609393e-06,
++      -0.0004235847016010751,
++      0.0011748173582669405,
++      0.001594407164422833,
++      0.008469159475870885,
++      0.04586129753914989,
++      0.0001663333396344418,
++      0.00020366107382550376,
++      0.08133589006072228,
++      9.695178654372116e-05,
++      0.00033540268456375887,
++      0.12480025567273889,
++      -3.530498122778753e-05,
++      0.0005669670821348683,
++      0.7480025567273889,
++      0.0003807589109793554,
++      0.0030252179610098535
++    ],
++    "scale": [
++      0.007581784624689702,
++      0.012794950928696237,
++      0.031237761203409667,
++      0.0019028343460378203,
++      0.0034708070879185845,
++      0.008516571158273851,
++      0.0002295085266655295,
++      0.2840785211575323,
++      0.001419546266041022,
++      0.0010544870498981854,
++      0.7427664525029424,
++      0.20918422246234433,
++      0.005508075311245819,
++      0.00669790210860584,
++      0.27335025708556276,
++      0.0026755794871777413,
++      0.00905792910555365,
++      0.33049228713657436,
++      0.0015567431646506245,
++      0.011122354393469583,
++      0.4341597999085912,
++      0.004213034845258777,
++      0.027067006371079803
++    ],
++    "beta": [
++      -0.007588033921486316,
++      0.0020340293361608753,
++      0.0008843414058558236,
++      -0.00038553341653998005,
++      0.00014188146743937365,
++      0.0006411982289167289,
++      -0.0006550036273920151,
++      1.341615861196708e-05,
++      7.389175944557056e-06,
++      -0.00021941068696291615,
++      -0.0010374755542427118,
++      1.5970813027870486e-05,
++      -6.301290538469864e-05,
++      0.003464685058469392,
++      -0.0001159949415008917,
++      3.9592979336250004e-05,
++      0.0014727279595482476,
++      -0.00013125262740469113,
++      0.0001329557819049651,
++      0.0001556349342020622,
++      -0.0001895101444454929,
++      -9.577649962127893e-05,
++      -0.001862044467136004,
++      -0.0002944397303351563
++    ],
++    "train_rows": 6258,
++    "train_rmse": 0.002550039226268641,
++    "validation": {
++      "family": "event_regime",
++      "horizon": 20,
++      "ridge": 0.01,
++      "validation_clusters": 12,
++      "opportunities": 13,
++      "mean_net_touch_return": 0.026584744476349103,
++      "ci_low": 0.022184452550293426,
++      "ci_high": 0.030196015424472724
++    },
++    "supported_proxy": true
++  },
++  "overshoot_reversal": {
++    "family": "overshoot_reversal",
++    "horizon": 10,
++    "ridge": 0.01,
++    "mean": [
++      0.000990238336498332,
++      -0.007929887321675764,
++      -0.028818578322197516,
++      1.2012135486061245e-05,
++      -0.0002762349748232313,
++      -0.0016324899291463165,
++      -3.2639509293713634e-07,
++      -0.00452510526746134,
++      0.0010887549621781357,
++      0.0013789183860162186,
++      0.0033407572383073497,
++      0.0,
++      0.0,
++      0.0,
++      0.053452115812917596,
++      8.921616554687113e-05,
++      -0.0015317000742390496,
++      0.133630289532294,
++      0.00033995315232121184,
++      -0.003829250185597629,
++      0.8129175946547884,
++      0.0005610690186302492,
++      -0.023457628062360736
++    ],
++    "scale": [
++      0.005135733210079221,
++      0.0053420057034888994,
++      0.005263976875168278,
++      0.0009004883017564518,
++      0.0022992455042232397,
++      0.007039541262641803,
++      0.00021306830355603053,
++      0.29416480751951435,
++      0.0013316706872504329,
++      0.0008976958514011048,
++      0.7469238904589968,
++      1.0,
++      1.0,
++      1.0,
++      0.2249332948410278,
++      0.001432962219115544,
++      0.006551019223921157,
++      0.3402546623513242,
++      0.0016091245696895284,
++      0.009924300377866145,
++      0.38997766468794426,
++      0.004719675714745198,
++      0.012228766977060964
++    ],
++    "beta": [
++      -0.007104902129500549,
++      7.092580421916724e-05,
++      5.5096815477122667e-05,
++      -7.83557791308056e-05,
++      -0.00014230664660780425,
++      0.00062185476028684,
++      -0.0005238083157532692,
++      9.233755693100142e-05,
++      -2.899408655862606e-05,
++      -0.00016049461663844515,
++      -0.0007652966059357053,
++      2.3892521703132576e-05,
++      0.0,
++      0.0,
++      0.0,
++      -0.0003682854914278943,
++      0.0007772161840180014,
++      -0.0005318395840016233,
++      0.00014717147722864135,
++      0.0005881405780861673,
++      2.2700987139827145e-05,
++      8.40147800839292e-05,
++      -0.00035931639729762507,
++      0.00023275747420601993
++    ],
++    "train_rows": 2694,
++    "train_rmse": 0.0016588032261287073,
++    "validation": {
++      "family": "overshoot_reversal",
++      "horizon": 10,
++      "ridge": 0.01,
++      "validation_clusters": 1,
++      "opportunities": 1,
++      "mean_net_touch_return": 0.0009483501686178286,
++      "ci_low": null,
++      "ci_high": null
++    },
++    "supported_proxy": false
++  },
++  "cross_asset": {
++    "family": "cross_asset",
++    "horizon": 10,
++    "ridge": 0.1,
++    "mean": [
++      6.540100414945933e-05,
++      0.00020435887395034056,
++      0.00040649950910817895,
++      2.62734749213087e-06,
++      -6.981011669809415e-07,
++      -3.960383361005908e-05,
++      4.576137248366175e-06,
++      0.005264732371153349,
++      0.0007536252809787126,
++      0.0014816821131445003,
++      0.0036956521739130435,
++      -0.00020505697511732224,
++      -0.00044610334271823746
++    ],
++    "scale": [
++      0.0023103937715911516,
++      0.00413297610365381,
++      0.009232849319926396,
++      0.0022395297285239704,
++      0.004983255954487529,
++      0.010256246845137634,
++      0.00020633395918325553,
++      0.283729485827875,
++      0.00107988439247323,
++      0.0010606155689409386,
++      0.7429285725385423,
++      0.0036174650737958694,
++      0.005849267501296413
++    ],
++    "beta": [
++      -0.007123497616425462,
++      0.0006007589011136357,
++      0.0026316017324977186,
++      -0.0008238789028803261,
++      0.001372022142841449,
++      0.0018579737951343906,
++      -0.0010384949261402006,
++      5.5336920282091045e-05,
++      0.00013211468784380808,
++      -3.355252201593055e-05,
++      -0.0009753814726831776,
++      0.00014643578432995116,
++      -0.00044716066744582565,
++      -0.0005204601330132834
++    ],
++    "train_rows": 4600,
++    "train_rmse": 0.006482923852924669,
++    "validation": {
++      "family": "cross_asset",
++      "horizon": 10,
++      "ridge": 0.1,
++      "validation_clusters": 17,
++      "opportunities": 21,
++      "mean_net_touch_return": 0.00936490171618661,
++      "ci_low": 0.0036598024580420693,
++      "ci_high": 0.014975933331392372
++    },
++    "supported_proxy": true
++  }
++}
+diff --git a/round2/results/frozen_protocol.json b/round2/results/frozen_protocol.json
+new file mode 100644
+--- /dev/null
++++ b/round2/results/frozen_protocol.json
+@@ -0,0 +1,256 @@
++{
++  "parameters": {
++    "event_regime": {
++      "safety": 0.001
++    },
++    "cross_asset": {
++      "safety": 0.001
++    },
++    "adaptive_allocator": {
++      "safety": 0.001
++    }
++  },
++  "code_sha256": {
++    "features.py": "289cd12b209a05e258672c86e87d9fe30bbc27f9105cdce4306eeedeeae282df",
++    "models.py": "7c28b9c17c9296fdca70e68ea03be4645048f11eb1ead48cf3783968c9908344",
++    "strategies.py": "adbfc6c9dd9754e90d951926be627f83c941e5d290356258ae716279ac7bba5f",
++    "gateway.py": "ac09b879dbb95b1a778eae61b9a40ebc8c32f9a524e346fa0c983fd564cbea6c",
++    "runner.py": "c8737098258211dd896e8da3c499b91fabbc2087286ae514428b20067783d809",
++    "baselines.py": "a0d4eb2f585c7ac79c9c512ce9cbdebad37f414a7792f10137d73f823c609a81",
++    "experiments.py": "28c8c506ada4d91aec182aa411b027534113ba830fd9aaa338f02af8550b6a37"
++  },
++  "models_sha256": "d03f21e06503ee05c52a1e826c96dcbf123be9f1cb0d4b983826da4ab026d5ad",
++  "discovery_seeds": [
++    4000,
++    4001,
++    4002,
++    4003,
++    4004,
++    4005,
++    4006,
++    4007,
++    4008,
++    4009,
++    4010,
++    4011,
++    4012,
++    4013,
++    4014,
++    4015,
++    4016,
++    4017,
++    4018,
++    4019,
++    4020,
++    4021,
++    4022,
++    4023,
++    4024,
++    4025,
++    4026,
++    4027,
++    4028,
++    4029,
++    4030,
++    4031,
++    4032,
++    4033,
++    4034,
++    4035,
++    4036,
++    4037,
++    4038,
++    4039
++  ],
++  "validation_seeds": [
++    4100,
++    4101,
++    4102,
++    4103,
++    4104,
++    4105,
++    4106,
++    4107,
++    4108,
++    4109,
++    4110,
++    4111,
++    4112,
++    4113,
++    4114,
++    4115,
++    4116,
++    4117,
++    4118,
++    4119
++  ],
++  "test_seeds": [
++    6000,
++    6001,
++    6002,
++    6003,
++    6004,
++    6005,
++    6006,
++    6007,
++    6008,
++    6009,
++    6010,
++    6011,
++    6012,
++    6013,
++    6014,
++    6015,
++    6016,
++    6017,
++    6018,
++    6019,
++    6020,
++    6021,
++    6022,
++    6023,
++    6024,
++    6025,
++    6026,
++    6027,
++    6028,
++    6029,
++    6030,
++    6031,
++    6032,
++    6033,
++    6034,
++    6035,
++    6036,
++    6037,
++    6038,
++    6039,
++    6040,
++    6041,
++    6042,
++    6043,
++    6044,
++    6045,
++    6046,
++    6047,
++    6048,
++    6049,
++    6050,
++    6051,
++    6052,
++    6053,
++    6054,
++    6055,
++    6056,
++    6057,
++    6058,
++    6059,
++    6060,
++    6061,
++    6062,
++    6063,
++    6064,
++    6065,
++    6066,
++    6067,
++    6068,
++    6069,
++    6070,
++    6071,
++    6072,
++    6073,
++    6074,
++    6075,
++    6076,
++    6077,
++    6078,
++    6079,
++    6080,
++    6081,
++    6082,
++    6083,
++    6084,
++    6085,
++    6086,
++    6087,
++    6088,
++    6089,
++    6090,
++    6091,
++    6092,
++    6093,
++    6094,
++    6095,
++    6096,
++    6097,
++    6098,
++    6099
++  ],
++  "stress_seeds": [
++    6000,
++    6001,
++    6002,
++    6003,
++    6004,
++    6005,
++    6006,
++    6007,
++    6008,
++    6009,
++    6010,
++    6011,
++    6012,
++    6013,
++    6014,
++    6015,
++    6016,
++    6017,
++    6018,
++    6019,
++    6020,
++    6021,
++    6022,
++    6023,
++    6024,
++    6025,
++    6026,
++    6027,
++    6028,
++    6029,
++    6030,
++    6031,
++    6032,
++    6033,
++    6034,
++    6035,
++    6036,
++    6037,
++    6038,
++    6039,
++    6040,
++    6041,
++    6042,
++    6043,
++    6044,
++    6045,
++    6046,
++    6047,
++    6048,
++    6049
++  ],
++  "weeks": [
++    5,
++    9
++  ],
++  "cash": 175000,
++  "ticks": 1500,
++  "taker_fee": 0.003,
++  "stress_definitions": [
++    "fees_60bps",
++    "volatile",
++    "fast_quotes",
++    "latency_3ticks"
++  ],
++  "selection": "maximum mean paired net P&L increment versus active original on validation; no test inspection",
++  "shared_risk": "same cash, 150 shares, 70k gross, 60% cash reserve, 60 shares/request; new per-name notional <=20% starting cash"
++}
+diff --git a/round2/results/priority_stress_protocol.json b/round2/results/priority_stress_protocol.json
+new file mode 100644
+--- /dev/null
++++ b/round2/results/priority_stress_protocol.json
+@@ -0,0 +1,71 @@
++{
++  "seeds": [
++    6000,
++    6001,
++    6002,
++    6003,
++    6004,
++    6005,
++    6006,
++    6007,
++    6008,
++    6009,
++    6010,
++    6011,
++    6012,
++    6013,
++    6014,
++    6015,
++    6016,
++    6017,
++    6018,
++    6019
++  ],
++  "weeks": [
++    5,
++    9
++  ],
++  "stresses": [
++    "fees_60bps",
++    "volatile"
++  ],
++  "candidates": [
++    [
++      "event_regime",
++      {
++        "safety": 0.001
++      },
++      "event_regime"
++    ],
++    [
++      "cross_asset",
++      {
++        "safety": 0.001
++      },
++      "cross_asset"
++    ],
++    [
++      "adaptive_allocator",
++      {
++        "safety": 0.001
++      },
++      "adaptive_allocator"
++    ],
++    [
++      "original_active",
++      {},
++      "original_active"
++    ],
++    [
++      "round1_combined",
++      {},
++      "round1_combined"
++    ],
++    [
++      "no_trade",
++      {},
++      "no_trade"
++    ]
++  ],
++  "reason": "Budget-limited completion fixed before test results inspection"
++}
+diff --git a/round2/results/experiment_status.json b/round2/results/experiment_status.json
+new file mode 100644
+--- /dev/null
++++ b/round2/results/experiment_status.json
+@@ -0,0 +1,111 @@
++{
++  "generated_utc": "2026-10-30T06:57:27.839305+00:00",
++  "policy": "Preserve prior outputs; no refitting or tuning on test outcomes. New stress scope fixed before examining tests.",
++  "experiments": {
++    "validation_development.jsonl": {
++      "expected_runs": 400,
++      "saved_runs": 400,
++      "invalid_lines": 0,
++      "status": "completed",
++      "bytes": 16965149,
++      "sha256": "c5f403c4880b716b45e13ea29209c54f4b1ed5f105865543bc7e2ced06b7cc77"
++    },
++    "validation.jsonl": {
++      "expected_runs": 400,
++      "saved_runs": 400,
++      "invalid_lines": 0,
++      "status": "completed",
++      "bytes": 16998749,
++      "sha256": "07e212fdf4eb375ce95186919ebcb51b6288ebf2c589fb6c4506e7c062cdc848"
++    },
++    "test.jsonl": {
++      "expected_runs": 1400,
++      "saved_runs": 1400,
++      "invalid_lines": 0,
++      "status": "completed",
++      "bytes": 64036894,
++      "sha256": "2433650850a6333e24f2b63a991c52215ae82e2e56af54663eaea4fc0b47233e"
++    },
++    "priority_stress.jsonl": {
++      "expected_runs": 480,
++      "saved_runs": 480,
++      "invalid_lines": 0,
++      "status": "completed",
++      "bytes": 22227605,
++      "sha256": "9ff274d20667f8aac33702cdc1d65e19ad1f6834c41528147b2eafe7e8b17d98"
++    },
++    "historical_frozen.jsonl": {
++      "expected_runs": 15,
++      "saved_runs": 5,
++      "invalid_lines": 0,
++      "status": "partial",
++      "bytes": 274930,
++      "sha256": "e2023a1748aab1b7343479a3548ee54400a6ee7684408da003947ad43af7b5a8"
++    },
++    "historical_remaining.jsonl": {
++      "expected_runs": 10,
++      "saved_runs": 10,
++      "invalid_lines": 0,
++      "status": "completed",
++      "bytes": 498707,
++      "sha256": "aba82cfbf5ed4598f9ff45c7fe6226f5d19910cd06c6d9bdfcfe3c64d76b9629"
++    }
++  },
++  "deferred": [
++    "Corrected-label model refit and fresh validation (would invalidate completed selection)",
++    "Remaining 30 stress seeds; fast-quote and three-tick-latency stresses",
++    "Three sizing/uncertainty ablations",
++    "Historical chronological refit folds; existing tapes are not pristine holdouts"
++  ],
++  "development_caveats": [
++    "Original training labels condition on future absence of halts. Corrected diagnostic implementation is separate; frozen evaluation unchanged.",
++    "models_stockonly.json is an unevaluated alternative fit, not the model selected by completed validation.",
++    "Repeated validation uses the same 20 seed IDs and adds no independent evidence."
++  ],
++  "market_collection": {
++    "runs": 120,
++    "historical_recordings": 3
++  },
++  "completed_prior_work_not_rerun": [
++    "120 market collections",
++    "Three historical feature datasets",
++    "Two 400-run validation files on the same seeds",
++    "Model fits and parameter grids",
++    "Round I audit"
++  ],
++  "frozen_model_sha256": "d03f21e06503ee05c52a1e826c96dcbf123be9f1cb0d4b983826da4ab026d5ad",
++  "test_provenance_model_matches": true,
++  "frozen_code_matches": true,
++  "completion_source_sha256": {
++    "round2/__init__.py": "055556f7a1985430c80968dcb7b8353f7a59a7453da552a80d0fab74e7bfcd6b",
++    "round2/baselines.py": "a0d4eb2f585c7ac79c9c512ce9cbdebad37f414a7792f10137d73f823c609a81",
++    "round2/bootstrap.py": "884d4ceb629f4b662448aeeac5bb1a62ebb1a294f682e24e04471ec4b0ff2037",
++    "round2/completion_report.py": "531d03591803573163a20fdb0bdf8b3fbff487d5159ad4c0d7c5cefd1b67dded",
++    "round2/conftest.py": "b44335ff06b2df47b1caa218c060ebdbba508f037d8266bb8e68319cad26fd87",
++    "round2/experiments.py": "28c8c506ada4d91aec182aa411b027534113ba830fd9aaa338f02af8550b6a37",
++    "round2/features.py": "289cd12b209a05e258672c86e87d9fe30bbc27f9105cdce4306eeedeeae282df",
++    "round2/finish_experiments.py": "ec5cbcd42a674fca726643757d116a0f01c37babadabe3c2061a040b43b235d8",
++    "round2/fit_discovery.py": "fac5405fa1b02eccbcbf9be4983799c9fbf69a2bb9306ea282d0aabc8b5083a1",
++    "round2/gateway.py": "ac09b879dbb95b1a778eae61b9a40ebc8c32f9a524e346fa0c983fd564cbea6c",
++    "round2/history_eval.py": "42fb9286395de5ecb54e9b3747aaa2788a32677ed4fff070e36ee1da6eaa0ac9",
++    "round2/label_diagnostics.py": "44c9030550b9d6134b435ac47a7e7bca69c80eb3233be168e4a84de26fb7363d",
++    "round2/labels_review.py": "9f7d8700c30219f25710bfd75ecd961359359e2a2a61048a54b77a9360633bd8",
++    "round2/models.py": "7c28b9c17c9296fdca70e68ea03be4645048f11eb1ead48cf3783968c9908344",
++    "round2/research.py": "6f9fcefec93daebe3eff0beb690a2ccc2960c6b2f2a3f775a1dffa8ad17d9cfe",
++    "round2/runner.py": "c8737098258211dd896e8da3c499b91fabbc2087286ae514428b20067783d809",
++    "round2/strategies.py": "adbfc6c9dd9754e90d951926be627f83c941e5d290356258ae716279ac7bba5f"
++  },
++  "tests": {
++    "passed": 11,
++    "failed": 0,
++    "skipped": 0,
++    "artifact": "round2/results/completion_tests.xml"
++  },
++  "historical_combined": {
++    "saved_runs": 15,
++    "expected_runs": 15,
++    "unique_combinations": 15,
++    "initial_batch_status": "failed after five saved outputs; preserved",
++    "resumption": "only unsaved combinations, with closed-session arrival handled by actual exchange"
++  }
++}
+diff --git a/round2/results/verification.json b/round2/results/verification.json
+new file mode 100644
+--- /dev/null
++++ b/round2/results/verification.json
+@@ -0,0 +1,66 @@
++{
++  "test": {
++    "runs": 1400,
++    "same_tick_fills": 0,
++    "missing_fill_provenance": 0,
++    "liquidations": 0,
++    "position_violations": 0,
++    "team_position_violations": 0,
++    "rejection_codes": {
++      "SYMBOL_HALTED": 255,
++      "ORDER_NOT_FOUND": 62046,
++      "POST_ONLY_CROSS": 514,
++      "STP_CANCEL": 4
++    }
++  },
++  "priority_stress": {
++    "runs": 480,
++    "same_tick_fills": 0,
++    "missing_fill_provenance": 0,
++    "liquidations": 0,
++    "position_violations": 0,
++    "team_position_violations": 0,
++    "rejection_codes": {
++      "SYMBOL_HALTED": 118,
++      "ORDER_NOT_FOUND": 23106,
++      "POST_ONLY_CROSS": 229
++    }
++  },
++  "historical": {
++    "runs": 15,
++    "same_tick_fills": 0,
++    "missing_fill_provenance": 0,
++    "liquidations": 0,
++    "position_violations": 0,
++    "team_position_violations": 0,
++    "rejection_codes": {
++      "SESSION_CLOSED": 3
++    }
++  },
++  "test_rejections_by_strategy": {
++    "adaptive_allocator": {
++      "SYMBOL_HALTED": 31
++    },
++    "cross_asset": {
++      "SYMBOL_HALTED": 20
++    },
++    "event_regime": {
++      "SYMBOL_HALTED": 8
++    },
++    "no_trade": {},
++    "original": {
++      "SYMBOL_HALTED": 71
++    },
++    "original_active": {
++      "SYMBOL_HALTED": 82
++    },
++    "round1_combined": {
++      "SYMBOL_HALTED": 43,
++      "ORDER_NOT_FOUND": 62046,
++      "POST_ONLY_CROSS": 514,
++      "STP_CANCEL": 4
++    }
++  },
++  "new_strategy_maker_rebates": 0.0,
++  "test_unique_keys": 1400
++}
+diff --git a/round2/results/oos_metrics.csv b/round2/results/oos_metrics.csv
+new file mode 100644
+--- /dev/null
++++ b/round2/results/oos_metrics.csv
+@@ -0,0 +1,22 @@
++stress,week,strategy,runs,seeds,net_pnl,gross_pnl,fees,rebates,slippage,turnover,fills,sharpe,worst_drawdown_pct,max_position,max_gross,liquidations,position_violations,team_violations,same_tick_fills,delta_original_active,low_original_active,high_original_active,pairs_original_active,delta_original,low_original,high_original,pairs_original,delta_round1_combined,low_round1_combined,high_round1_combined,pairs_round1_combined,delta_no_trade,low_no_trade,high_no_trade,pairs_no_trade
++base,pooled,adaptive_allocator,200,100,1234.6605267842674,1390.9426688342674,156.28214205,0.0,38.157724999999985,0.27074877961173116,11.99,1.3449930557831575,0.8261469582698353,66,67734.1146067689,0,0,0,0,-419.08139149133945,-501.86140933381233,-333.1643373570283,100,-66.31152150163122,-137.44214641355964,7.928599575286971,100,409.0275877867233,325.2064224169694,494.0276332127936,100,689.6537631174485,582.9281774971131,800.006936418547,100
++base,pooled,cross_asset,200,100,576.5343934603538,605.9495088103539,29.415115349999997,0.0,0.35112500000002184,0.050959758312628056,5.22,1.7168819328195901,0.6817986975919551,66,37260.4727098648,0,0,0,0,-1077.207524815253,-1226.2994378806297,-934.4639742153207,100,-724.4376548255448,-839.7992656240992,-612.7189779708709,100,-249.09854553719023,-302.51542089199955,-195.6745695690181,100,31.527629793535016,22.331783672820844,41.050174047274204,100
++base,pooled,event_regime,200,100,1217.8616069222148,1382.408793222215,164.5471863,0.0,54.453374999999866,0.2850671657638147,11.165,1.2461453887537375,0.8261469582698353,66,66204.40514848153,0,0,0,0,-435.880311353392,-515.273888840286,-354.30714738570475,100,-83.11044136368379,-152.84950792217015,-11.557735880248417,100,392.22866792467073,311.00736470662065,475.0588886560614,100,672.854843255396,564.0929341806731,783.5117892969573,100
++base,pooled,no_trade,200,100,545.0067636668189,545.0067636668189,0.0,0.0,0.0,0.0,0.0,1.9294211262777525,0.6817986975919551,6,19291.471652259206,0,0,0,0,-1108.735154608788,-1262.6394228538509,-961.3106500263042,100,-755.9652846190797,-876.5327658016668,-640.0070214123645,100,-280.62617533072523,-334.9198148170547,-226.15739068817373,100,0.0,0.0,0.0,100
++base,pooled,original,200,100,1300.9720482858986,1493.6291316858988,192.65708339999998,0.0,132.18999999999994,0.3337665824366725,13.225,1.6916694333218196,1.284805525019857,150,73158.11901812967,0,0,0,0,-352.76986998970824,-409.57116456627375,-296.5643487110711,100,0.0,0.0,0.0,100,475.3391092883545,375.7346389082932,577.0226832809733,100,755.9652846190797,640.0070214123643,876.5327658016668,100
++base,pooled,original_active,200,100,1653.7419182756068,1980.2356051256068,326.49368685,0.0,227.1334999999999,0.5656294694479067,26.11,1.4206311432930214,1.284805525019857,150,73158.11901812967,0,0,0,0,0.0,0.0,0.0,100,352.76986998970824,296.56434871107103,409.57116456627364,100,828.1089792780627,706.0099291704498,954.4168812535896,100,1108.735154608788,961.3106500263042,1262.6394228538509,100
++base,pooled,round1_combined,200,100,825.6329389975441,713.3299812975439,-112.30295770000022,192.14683430000002,-136.737425,1.0980571111877802,343.9,1.8989836842581824,0.8694396265854825,11,35623.197716370196,0,0,0,0,-828.1089792780627,-954.4168812535896,-706.0099291704498,100,-475.3391092883545,-577.0226832809733,-375.7346389082933,100,0.0,0.0,0.0,100,280.62617533072523,226.15739068817373,334.9198148170547,100
++base,5,adaptive_allocator,100,100,1529.8325186912718,1739.6971427912722,209.86462410000001,0.0,55.5196499999999,0.3635766721140395,12.83,1.2636928773972642,0.8261469582698353,66,67734.1146067689,0,0,0,0,-543.950751667846,-672.9699480024402,-414.9223764053357,100,-543.950751667846,-672.9699480024402,-414.9223764053357,100,695.0145457575168,570.9902232889705,823.6366993870801,100,967.9798175703135,809.5535058763949,1136.7422159304151,100
++base,5,cross_asset,100,100,590.8113136406843,627.2859196406843,36.474606,0.0,-0.3176499999999589,0.06318977528085248,5.84,1.640771899761315,0.6817986975919551,66,37260.4727098648,0,0,0,0,-1482.9719567184336,-1719.2030964739552,-1254.6219780089077,100,-1482.9719567184336,-1719.2030964739552,-1254.6219780089077,100,-244.00665929307084,-306.2387646061622,-184.19462739230855,100,28.958612519725865,14.467059972607334,43.56362943914627,100
++base,5,event_regime,100,100,1496.7959889121935,1710.4597992121937,213.6638103,0.0,68.93704999999977,0.3701586859308202,12.12,1.2212688742375395,0.8261469582698353,66,66204.40514848153,0,0,0,0,-576.9872814469243,-708.3525832704534,-445.8104580231611,100,-576.9872814469243,-708.3525832704534,-445.8104580231611,100,661.9780159784385,548.1459501957006,779.8859019542066,100,934.9432877912352,782.2561729541989,1096.2088339274896,100
++base,5,no_trade,100,100,561.8527011209584,561.8527011209584,0.0,0.0,0.0,0.0,0.0,1.8118457398964793,0.6817986975919551,6,19291.471652259206,0,0,0,0,-1511.9305692381595,-1753.0655316033335,-1280.014042824729,100,-1511.9305692381595,-1753.0655316033335,-1280.014042824729,100,-272.9652718127967,-333.9715712234941,-212.70513290314304,100,0.0,0.0,0.0,100
++base,5,original,100,100,2073.783270359118,2459.097437159118,385.3141668,0.0,264.3799999999998,0.667533164873345,26.45,1.336342353984613,1.284805525019857,150,73158.11901812967,0,0,0,0,0.0,0.0,0.0,100,0.0,0.0,0.0,100,1238.965297425363,1041.8853779886588,1445.8110795970429,100,1511.9305692381595,1280.0140428247287,1753.0655316033335,100
++base,5,original_active,100,100,2073.783270359118,2459.097437159118,385.3141668,0.0,264.3799999999998,0.667533164873345,26.45,1.336342353984613,1.284805525019857,150,73158.11901812967,0,0,0,0,0.0,0.0,0.0,100,0.0,0.0,0.0,100,1238.965297425363,1041.8853779886588,1445.8110795970429,100,1511.9305692381595,1280.0140428247287,1753.0655316033335,100
++base,5,round1_combined,100,100,834.8179729337551,736.3148986337551,-98.5030743,159.90103890000003,-113.54870000000007,0.9374278647266382,315.8,1.8364469638761711,0.8694396265854825,11,33325.45736843379,0,0,0,0,-1238.965297425363,-1445.8110795970429,-1041.885377988659,100,-1238.965297425363,-1445.8110795970429,-1041.885377988659,100,0.0,0.0,0.0,100,272.9652718127967,212.70513290314304,333.97157122349404,100
++base,9,adaptive_allocator,100,100,939.488534877263,1042.188194877263,102.69966000000001,0.0,20.795800000000057,0.1779208871094228,11.15,1.4262932341690508,0.5114620368211671,66,67169.51761466534,0,0,0,0,-294.21203131483287,-374.81554865340297,-210.24063086668457,100,411.3277086645836,327.2493151570428,496.04287070609274,100,123.04062981592986,51.11838065407746,194.87780959497684,100,411.3277086645836,327.2493151570428,496.04287070609274,100
++base,9,cross_asset,100,100,562.2574732800235,584.6130979800236,22.355624700000003,0.0,1.0199000000000025,0.03872974134440365,4.6,1.7929919658778641,0.5114620368211671,57,36488.04420189246,0,0,0,0,-671.4430929120723,-778.5647209955612,-563.8602777761788,100,34.096647067344165,23.61996054684909,45.15201367507448,100,-254.1904317813096,-308.42965957069777,-200.2042094114329,100,34.096647067344165,23.61996054684909,45.15201367507448,100
++base,9,event_regime,100,100,938.9272249322362,1054.3577872322362,115.43056230000002,0.0,39.96969999999997,0.19997564559680922,10.21,1.2710219032699352,0.5114620368211671,66,65959.60192988926,0,0,0,0,-294.77334125985976,-369.78832409246576,-217.38813781366335,100,410.7663987195567,329.1054950077755,492.60775368230037,100,122.47931987090298,55.022834583610255,188.67364284879145,100,410.7663987195567,329.1054950077755,492.60775368230037,100
++base,9,no_trade,100,100,528.1608262126794,528.1608262126794,0.0,0.0,0.0,0.0,0.0,2.046996512659026,0.5114620368211671,6,18714.667435937463,0,0,0,0,-705.5397399794165,-817.9674291570844,-592.7616608522161,100,0.0,0.0,0.0,100,-288.2870788486538,-345.4512533306311,-230.9934719338442,100,0.0,0.0,0.0,100
++base,9,original,100,100,528.1608262126794,528.1608262126794,0.0,0.0,0.0,0.0,0.0,2.046996512659026,0.5114620368211671,6,18714.667435937463,0,0,0,0,-705.5397399794165,-817.9674291570844,-592.7616608522161,100,0.0,0.0,0.0,100,-288.2870788486538,-345.4512533306311,-230.9934719338442,100,0.0,0.0,0.0,100
++base,9,original_active,100,100,1233.700566192096,1501.3737730920964,267.67320689999997,0.0,189.88699999999997,0.4637257740224682,25.77,1.5049199326014306,0.9012492361543657,150,72613.88393495491,0,0,0,0,0.0,0.0,0.0,100,705.5397399794165,592.761660852216,817.9674291570844,100,417.2526611307627,319.4428838886615,511.1494021129468,100,705.5397399794165,592.761660852216,817.9674291570844,100
++base,9,round1_combined,100,100,816.4479050613331,690.3450639613326,-126.1028411000004,224.39262969999996,-159.92614999999995,1.258686357648922,372.0,1.9615204046401937,0.6476946309805564,11,35623.197716370196,0,0,0,0,-417.2526611307627,-511.1494021129468,-319.4428838886615,100,288.2870788486538,230.9934719338442,345.4512533306311,100,0.0,0.0,0.0,100,288.2870788486538,230.9934719338442,345.4512533306311,100
+diff --git a/round2/results/priority_stress_metrics.csv b/round2/results/priority_stress_metrics.csv
+new file mode 100644
+--- /dev/null
++++ b/round2/results/priority_stress_metrics.csv
+@@ -0,0 +1,37 @@
++stress,week,strategy,runs,seeds,net_pnl,gross_pnl,fees,rebates,slippage,turnover,fills,sharpe,worst_drawdown_pct,max_position,max_gross,liquidations,position_violations,team_violations,same_tick_fills,delta_original_active,low_original_active,high_original_active,pairs_original_active,delta_original,low_original,high_original,pairs_original,delta_round1_combined,low_round1_combined,high_round1_combined,pairs_round1_combined,delta_no_trade,low_no_trade,high_no_trade,pairs_no_trade
++fees_60bps,pooled,adaptive_allocator,40,20,918.3230404318398,1162.81762243184,244.49458200000004,0.0,37.70974999999976,0.21178368647392126,8.55,1.1373316359480872,0.7685431124426594,66,62852.18770972918,0,0,0,0,-497.77419909408127,-697.001925337134,-318.5216330206185,20,,,,0,225.35527290696191,104.82060831155859,352.1556145027027,20,418.3954124302785,251.90270230206082,604.4556276078481,20
++fees_60bps,pooled,cross_asset,40,20,498.0372934959385,524.0684299959385,26.031136500000002,0.0,3.03624999999998,0.022548691813011428,2.025,1.5806628624689407,0.5779602332069043,52,29864.96161217526,0,0,0,0,-918.0599460299825,-1252.6046601692276,-611.4749672550189,20,,,,0,-194.93047402893936,-326.62342116044397,-69.68423841814194,20,-1.8903345056227407,-8.04671213258689,5.002526927920425,20
++fees_60bps,pooled,event_regime,40,20,908.7938871546546,1178.4687516546546,269.6748645,0.0,50.276499999999686,0.23359518794827022,9.325,1.034054683220805,0.7685431124426594,66,61827.89894297184,0,0,0,0,-507.3033523712664,-716.3233246649926,-318.0862058875743,20,,,,0,215.8261196297768,103.5227186706216,335.6200742516607,20,408.86625915309344,246.15379453851935,592.7010495306522,20
++fees_60bps,pooled,no_trade,40,20,499.92762800156123,499.92762800156123,0.0,0.0,0.0,0.0,0.0,1.7415446760172408,0.5779602332069043,6,19291.471652259206,0,0,0,0,-916.1696115243598,-1250.719453537549,-610.6792155338155,20,,,,0,-193.0401395233166,-324.4821049963903,-67.33408112161192,20,0.0,0.0,0.0,20
++fees_60bps,pooled,original_active,40,20,1416.097239525921,1971.239975025921,555.1427355,0.0,211.29924999999898,0.48087062444535833,22.675,1.0277151792149362,1.0043298216983836,150,72656.5473700177,0,0,0,0,0.0,0.0,0.0,20,,,,0,723.1294720010432,461.8993469277113,1013.4356179864028,20,916.1696115243598,610.6792155338153,1250.719453537549,20
++fees_60bps,pooled,round1_combined,40,20,692.9677675248779,633.1586390248775,-59.80912850000023,190.5777,-130.78974999999963,1.084053810899657,339.15,1.6147203698428012,0.736912857861645,11,33651.82006392334,0,0,0,0,-723.1294720010432,-1013.4356179864029,-461.89934692771135,20,,,,0,0.0,0.0,0.0,20,193.0401395233166,67.33408112161192,324.48210499639026,20
++fees_60bps,5,adaptive_allocator,20,20,1002.6342716922329,1319.7361376922331,317.10186600000003,0.0,45.91874999999921,0.2746733858994556,8.05,0.7276132338169199,0.7685431124426594,66,62852.18770972918,0,0,0,0,-664.1989215429494,-1080.821318819295,-298.3605056967067,20,,,,0,414.30039388435836,214.74161232990568,649.7880067328808,20,581.2411843293855,313.27981252762805,889.2184348414125,20
++fees_60bps,5,cross_asset,20,20,415.171322074924,448.97879307492394,33.807471,0.0,2.0742499999999593,0.029284312024472146,2.15,1.091063145441437,0.5779602332069043,52,28367.423753806237,0,0,0,0,-1251.6618711602582,-1857.2937126323638,-705.8670565691767,20,,,,0,-173.16255573295058,-318.4986205026485,-36.289700167478884,20,-6.221765287923335,-19.86598188670494,8.39829388725353,20
++fees_60bps,5,event_regime,20,20,1001.2602514589701,1350.9616324589704,349.70138099999997,0.0,63.373249999999054,0.3029136133701682,9.1,0.6878785451415503,0.7685431124426594,66,57763.26813482898,0,0,0,0,-665.5729417762122,-1110.6021568518179,-263.7037936611152,20,,,,0,412.9263736510955,234.46299401507574,618.22436426249,20,579.8671640961227,322.9500199942569,879.4959797288374,20
++fees_60bps,5,no_trade,20,20,421.39308736284727,421.39308736284727,0.0,0.0,0.0,0.0,0.0,1.265120045359057,0.5779602332069043,6,19291.471652259206,0,0,0,0,-1245.440105872335,-1853.6372945281691,-696.3252302104902,20,,,,0,-166.94079044502723,-308.27394880222823,-34.20844009093543,20,0.0,0.0,0.0,20
++fees_60bps,5,original_active,20,20,1666.8331932351823,2358.0742962351824,691.241103,0.0,252.4222499999979,0.5987587914372453,23.75,0.6940321643288031,1.0043298216983836,150,72656.5473700177,0,0,0,0,0.0,0.0,0.0,20,,,,0,1078.4993154273077,568.7718577832746,1643.7823855687543,20,1245.440105872335,696.32523021049,1853.637294528169,20
++fees_60bps,5,round1_combined,20,20,588.3338778078745,555.8246918078746,-32.50918600000004,153.02476300000004,-102.7389999999998,0.8997120542731529,302.35,1.250704596539814,0.736912857861645,11,32175.40103757036,0,0,0,0,-1078.4993154273077,-1643.7823855687545,-568.7718577832748,20,,,,0,0.0,0.0,0.0,20,166.94079044502723,34.208440090935404,308.2739488022281,20
++fees_60bps,9,adaptive_allocator,20,20,834.0118091714467,1005.8991071714466,171.88729800000004,0.0,29.500750000000302,0.14889398704838702,9.05,1.5470500380792547,0.47761353056826467,66,61594.91905906678,0,0,0,0,-331.34947664521314,-443.0745299703174,-221.74236828349788,20,,,,0,36.41015192956547,-80.63351666428073,162.53767751994712,20,255.54964053117146,133.92007832412088,396.58465423218456,20
++fees_60bps,9,cross_asset,20,20,580.903264916953,599.1580669169531,18.254802,0.0,3.99825,0.015813071601550703,1.9,2.070262579496444,0.47761353056826467,30,29864.96161217526,0,0,0,0,-584.4580208997068,-791.165471403002,-394.75903728970115,20,,,,0,-216.69839232492814,-351.83708411027266,-88.1755410169168,20,2.441096276677854,-0.8337061092825024,6.241387482592469,20
++fees_60bps,9,event_regime,20,20,816.3275228503393,1005.9758708503392,189.64834800000003,0.0,37.17975000000033,0.1642767625263723,9.55,1.3802308213000596,0.47761353056826467,66,61827.89894297184,0,0,0,0,-349.0337629663205,-467.30263327007685,-237.08340373240162,20,,,,0,18.725865608458115,-82.77823583958646,123.79688263175697,20,237.8653542100641,137.01949447310534,351.31365538431623,20
++fees_60bps,9,no_trade,20,20,578.4621686402752,578.4621686402752,0.0,0.0,0.0,0.0,0.0,2.217969306675425,0.47761353056826467,6,18503.990228081886,0,0,0,0,-586.8991171763846,-795.4927350763065,-396.26915290278765,20,,,,0,-219.139488601606,-357.06266653300673,-88.95600592989074,20,0.0,0.0,0.0,20
++fees_60bps,9,original_active,20,20,1165.3612858166598,1584.40565381666,419.044368,0.0,170.17625000000004,0.3629824574534715,21.6,1.361398194101069,0.42135000727352817,150,71785.84335725517,0,0,0,0,0.0,0.0,0.0,20,,,,0,367.7596285747786,241.20761615378933,502.07458040729836,20,586.8991171763846,396.2691529027876,795.4927350763064,20
++fees_60bps,9,round1_combined,20,20,797.6016572418812,710.4925862418808,-87.10907100000043,228.13063699999998,-158.8404999999995,1.2683955675261607,375.95,1.9787361431457877,0.5454568514720495,11,33651.82006392334,0,0,0,0,-367.7596285747786,-502.0745804072984,-241.20761615378936,20,,,,0,0.0,0.0,0.0,20,219.139488601606,88.95600592989071,357.06266653300673,20
++volatile,pooled,adaptive_allocator,40,20,1287.5505462969463,1449.6114087969465,162.0608625,0.0,120.86200000000017,0.28076290108032903,10.05,0.6812944285929078,0.8923229107551248,66,71016.57585325287,0,0,0,0,-478.738761168388,-1005.1951662124453,-95.13938308124949,20,,,,0,530.8255838751757,286.8001552997744,798.7388961882472,20,753.0739937972743,450.92080660464774,1096.1468974457182,20
++volatile,pooled,cross_asset,40,20,552.0428454829969,590.2768397329969,38.23399425,0.0,24.487874999999843,0.0662397400941791,4.675,1.1229402367219277,0.8960918354803532,66,38017.66581981208,0,0,0,0,-1214.2464619823375,-1919.6211602281564,-713.4793791134769,20,,,,0,-204.68211693877385,-362.1611943608355,-58.02778339624658,20,17.56629298332482,-37.84295162517682,62.52105531217565,20
++volatile,pooled,event_regime,40,20,1280.8906217143237,1458.127109464324,177.23648774999998,0.0,142.05224999999987,0.3070533120569067,9.825,0.6372300795184934,0.8894457011225099,66,73113.94801714455,0,0,0,0,-485.39868575101065,-1003.9133947634749,-122.40115688071923,20,,,,0,524.1656592925531,311.37090026064885,760.3607962856283,20,746.4140692146517,470.9775424870885,1058.4195784109659,20
++volatile,pooled,no_trade,40,20,534.4765524996722,534.4765524996722,0.0,0.0,0.0,0.0,0.0,1.3285736762793126,0.7494614211355731,6,19924.86753719971,0,0,0,0,-1231.8127549656624,-1953.4321241293846,-711.8145687069853,20,,,,0,-222.24840992209866,-367.94614187421223,-85.76438148556359,20,0.0,0.0,0.0,20
++volatile,pooled,original_active,40,20,1766.2893074653343,1994.677626715334,228.38831925,0.0,285.31837500000046,0.39567347163502536,20.125,0.8600284462927178,1.0647674310389512,150,79822.40760542388,0,0,0,0,0.0,0.0,0.0,20,,,,0,1009.5643450435637,539.7465503577954,1654.2894671438853,20,1231.8127549656624,711.814568706985,1953.4321241293846,20
++volatile,pooled,round1_combined,40,20,756.7249624217708,674.6045114217707,-82.12045099999997,137.5666865,-165.0341249999999,0.7860914438664662,293.4,1.3832625268946044,0.9846110272514228,11,34818.45013780478,0,0,0,0,-1009.5643450435637,-1654.2894671438855,-539.7465503577954,20,,,,0,0.0,0.0,0.0,20,222.24840992209866,85.76438148556349,367.9461418742122,20
++volatile,5,adaptive_allocator,20,20,1476.1583777646913,1684.7533367646913,208.59495899999996,0.0,158.63800000000035,0.3613780793843565,10.5,0.4774287933201391,0.8923229107551248,66,68614.85869327826,0,0,0,0,-331.0999554505717,-603.9765556385951,-26.45071684100711,20,,,,0,871.9371120151482,486.3690686922823,1307.0131337247467,20,1037.8229341529325,578.6508542901831,1569.5368322746135,20
++volatile,5,cross_asset,20,20,444.23020651611586,487.68682801611595,43.4566215,0.0,29.65849999999984,0.07528678189262454,4.55,0.8181688095142163,0.8960918354803532,66,37861.390256337494,0,0,0,0,-1363.0281266991472,-1908.4227384365663,-868.1716099187078,20,,,,0,-159.99105923342722,-342.9904284154902,10.612788766921982,20,5.894762904357049,-86.18639768682176,79.69204799765703,20
++volatile,5,event_regime,20,20,1492.0892769097075,1715.8246539097076,223.73537699999997,0.0,175.34099999999995,0.3876110430960757,10.45,0.4874008207814242,0.8894457011225099,66,69597.35758182063,0,0,0,0,-315.16905630555556,-570.5751287772183,-34.608204213032444,20,,,,0,887.8680111601643,540.0002378561028,1279.021582510223,20,1053.7538332979486,631.2072731248128,1536.2919638164649,20
++volatile,5,no_trade,20,20,438.3354436117588,438.3354436117588,0.0,0.0,0.0,0.0,0.0,0.978029175857451,0.7494614211355731,6,19924.86753719971,0,0,0,0,-1368.9228896035042,-1939.3713289091972,-857.8353712993701,20,,,,0,-165.88582213778426,-333.0368723846091,-4.3773632066625705,20,0.0,0.0,0.0,20
++volatile,5,original_active,20,20,1807.258333215263,2096.2832802152625,289.024947,0.0,368.9570000000006,0.5007203310077457,20.15,0.6624786611603042,1.0647674310389512,150,74698.222984772,0,0,0,0,0.0,0.0,0.0,20,,,,0,1203.03706746572,735.0806228732857,1704.5586263944049,20,1368.9228896035042,857.8353712993701,1939.371328909197,20
++volatile,5,round1_combined,20,20,604.2212657495431,516.8364392495431,-87.3848265,121.37357549999999,-145.6392500000004,0.6897141624365851,295.0,1.0852704706982106,0.9846110272514228,11,33394.820294582576,0,0,0,0,-1203.03706746572,-1704.5586263944049,-735.0806228732861,20,,,,0,0.0,0.0,0.0,20,165.88582213778426,4.377363206662422,333.03687238460907,20
++volatile,9,adaptive_allocator,20,20,1098.9427148292016,1214.4694808292018,115.526766,0.0,83.08599999999998,0.2001477227763015,9.6,0.8851600638656762,0.6466553696373586,66,71016.57585325287,0,0,0,0,-626.3775668862042,-1572.9361729013622,15.132612798293435,20,,,,0,189.71405573520315,21.164851403150788,380.638157143236,20,468.3250534416162,245.03988909338395,715.4460059108171,20
++volatile,9,cross_asset,20,20,659.855484449878,692.8668514498779,33.01136699999999,0.0,19.317249999999845,0.05719269829573367,4.8,1.4277116639296392,0.6466553696373586,66,38017.66581981208,0,0,0,0,-1065.464797265528,-2047.36090096838,-405.0485005499061,20,,,,0,-249.37317464412044,-407.1045075349679,-104.5562636670213,20,29.23782306229259,0.5375340757608867,56.91576375349035,20
++volatile,9,event_regime,20,20,1069.6919665189403,1200.4295650189401,130.7375985,0.0,108.76349999999982,0.22649558101773773,9.2,0.7870593382555625,0.6466553696373586,66,73113.94801714455,0,0,0,0,-655.6283151964657,-1554.7168499704562,-58.092765948522235,20,,,,0,160.46330742494175,19.463105444799805,322.763089136803,20,439.0743051313548,236.69924825102558,665.8043459450308,20
++volatile,9,no_trade,20,20,630.6176613875854,630.6176613875854,0.0,0.0,0.0,0.0,0.0,1.6791181767011736,0.6466553696373586,6,19253.7912634096,0,0,0,0,-1094.7026203278206,-2083.878582000672,-423.2668145102633,20,,,,0,-278.61099770641306,-436.0377018864889,-131.75425589417998,20,0.0,0.0,0.0,20
++volatile,9,original_active,20,20,1725.3202817154058,1893.071973215406,167.7516915,0.0,201.67975000000033,0.29062661226230496,20.1,1.0575782314251312,0.6357131096841608,150,79822.40760542388,0,0,0,0,0.0,0.0,0.0,20,,,,0,816.0916226214074,183.59260515688962,1756.184236496839,20,1094.7026203278206,423.26681451026326,2083.878582000672,20
++volatile,9,round1_combined,20,20,909.2286590939984,832.3725835939983,-76.85607549999996,153.75979750000002,-184.42899999999943,0.8824687252963473,291.8,1.6812545830909982,0.7626900510104165,11,34818.45013780478,0,0,0,0,-816.0916226214074,-1756.1842364968393,-183.59260515688976,20,,,,0,0.0,0.0,0.0,20,278.61099770641306,131.75425589417998,436.0377018864889,20
+diff --git a/round2/results/historical_metrics.csv b/round2/results/historical_metrics.csv
+new file mode 100644
+--- /dev/null
++++ b/round2/results/historical_metrics.csv
+@@ -0,0 +1,16 @@
++week,strategy,net_pnl,delta_original_active,delta_no_trade,fees,fills,worst_drawdown_pct,liquidations,position_violations
++2,adaptive_allocator,1055.7793383654207,-1.1025245992350392,-1.6944166813336778,1.84572,4,0.2742025386028927,0,0
++2,cross_asset,1055.7793383654207,-1.1025245992350392,-1.6944166813336778,1.84572,4,0.2742025386028927,0,0
++2,event_regime,1057.4737550467544,0.5918920820986386,0.0,0.0,0,0.2742025386028927,0,0
++2,no_trade,1057.4737550467544,0.5918920820986386,0.0,0.0,0,0.2742025386028927,0,0
++2,original_active,1056.8818629646557,0.0,-0.5918920820986386,6.84192,10,0.26881236178229545,0,0
++3,adaptive_allocator,777.9777154446929,-30.97230599290924,0.0,0.0,0,0.15790031630620233,0,0
++3,cross_asset,777.9777154446929,-30.97230599290924,0.0,0.0,0,0.15790031630620233,0,0
++3,event_regime,777.9777154446929,-30.97230599290924,0.0,0.0,0,0.15790031630620233,0,0
++3,no_trade,777.9777154446929,-30.97230599290924,0.0,0.0,0,0.15790031630620233,0,0
++3,original_active,808.9500214376021,0.0,30.97230599290924,13.47543,18,0.15787228627875818,0,0
++4,adaptive_allocator,380.16354184324155,-19.500314877688652,-20.68704324425198,5.91588,15,0.22898611136959193,0,0
++4,cross_asset,349.1884944707854,-50.475362250144826,-51.662090616708156,19.554449999999996,29,0.24042378121193836,0,0
++4,event_regime,400.8505850874935,1.1867283665633295,0.0,0.0,0,0.22898611136959193,0,0
++4,no_trade,400.8505850874935,1.1867283665633295,0.0,0.0,0,0.22898611136959193,0,0
++4,original_active,399.6638567209302,0.0,-1.1867283665633295,43.92758999999999,28,0.22897584626480638,0,0
+diff --git a/round2/results/pnl_attribution.csv b/round2/results/pnl_attribution.csv
+new file mode 100644
+--- /dev/null
++++ b/round2/results/pnl_attribution.csv
+@@ -0,0 +1,8 @@
++strategy,cash_difference,terminal_overlay_value,endowment_mark_difference,initial_equity_adjustment,net_excess_no_trade,max_accounting_residual
++adaptive_allocator,641.3021631174485,48.357,-0.005399999999983152,0.0,689.6537631174485,3.0240698833949864e-11
++cross_asset,31.531829793534854,0.0,-0.004199999999996607,0.0,31.527629793535016,2.9103830456733704e-11
++event_regime,624.562343255396,48.357,-0.06449999999999377,0.0,672.854843255396,3.0240698833949864e-11
++no_trade,0.0,0.0,0.0,0.0,0.0,0.0
++original,533.7635346190809,221.44725,0.754500000000018,0.0,755.9652846190797,3.058175934711471e-11
++original_active,887.2533546087892,220.9016,0.5801999999999972,0.0,1108.735154608788,3.058175934711471e-11
++round1_combined,278.7340253307276,0.32015000000000926,1.571999999999977,0.0,280.62617533072523,5.269384928396903e-11
+diff --git a/round2/results/label_selection_diagnostics.csv b/round2/results/label_selection_diagnostics.csv
+new file mode 100644
+--- /dev/null
++++ b/round2/results/label_selection_diagnostics.csv
+@@ -0,0 +1,121 @@
++seed,week,family,candidates,old_label_count,corrected_label_count,previously_dropped_scored,old_mean_net_touch,corrected_mean_net_touch,eligible_decisions,entry_rejected,delayed_exits,terminal_censored,missing_entry_quote
++4100,5,event_regime,18,0,14,14,,0.01462811357467916,4120,6,101,0,0
++4100,5,overshoot_reversal,0,0,0,0,,,4160,6,51,0,0
++4100,5,cross_asset,6,0,6,6,,0.0034899582340568633,4160,6,51,0,0
++4100,9,event_regime,12,0,12,12,,0.013520689878118572,5900,5,95,0,0
++4100,9,overshoot_reversal,0,0,0,0,,,5950,5,45,0,0
++4100,9,cross_asset,4,0,4,4,,0.007932959925684824,5950,5,45,0,0
++4103,5,event_regime,16,3,12,9,0.017583090175634936,0.016051692229017017,4420,5,95,0,0
++4103,5,overshoot_reversal,0,0,0,0,,,4460,5,45,0,0
++4103,5,cross_asset,6,2,6,4,0.00992453420332362,0.0028367178287883785,4460,5,45,0,0
++4102,5,event_regime,4,0,2,2,,0.015265368470205987,4720,4,76,0,0
++4102,5,overshoot_reversal,0,0,0,0,,,4760,4,36,0,0
++4102,5,cross_asset,0,0,0,0,,,4760,4,36,0,0
++4101,5,event_regime,0,0,0,0,,,5018,3,57,0,2
++4101,5,overshoot_reversal,0,0,0,0,,,5058,3,27,0,2
++4101,5,cross_asset,2,2,2,0,-0.0031398330757491655,-0.0031398330757491655,5058,3,27,0,2
++4102,9,event_regime,3,0,2,2,,0.008619830880450985,5600,6,114,0,0
++4102,9,overshoot_reversal,0,0,0,0,,,5650,6,54,0,0
++4102,9,cross_asset,0,0,0,0,,,5650,6,54,0,0
++4101,9,event_regime,0,0,0,0,,,5599,6,114,0,1
++4101,9,overshoot_reversal,0,0,0,0,,,5649,6,54,0,1
++4101,9,cross_asset,0,0,0,0,,,5649,6,54,0,1
++4103,9,event_regime,3,0,3,3,,0.022529426487544708,7100,1,19,0,0
++4103,9,overshoot_reversal,0,0,0,0,,,7150,1,9,0,0
++4103,9,cross_asset,4,4,4,0,-0.007722263968133386,-0.007722263968133386,7150,1,9,0,0
++4104,5,event_regime,0,0,0,0,,,3819,7,119,0,1
++4104,5,overshoot_reversal,0,0,0,0,,,3859,7,59,0,1
++4104,5,cross_asset,0,0,0,0,,,3859,7,59,0,1
++4106,5,event_regime,21,0,16,16,,0.02839942055986465,4120,6,96,0,0
++4106,5,overshoot_reversal,0,0,0,0,,,4160,6,46,0,0
++4106,5,cross_asset,7,0,6,6,,0.00445749269377856,4160,6,46,0,0
++4105,5,event_regime,13,7,10,3,0.017657557642491026,0.018311304996773303,5020,3,57,0,0
++4105,5,overshoot_reversal,0,0,0,0,,,5060,3,27,0,0
++4105,5,cross_asset,2,2,2,0,0.009476166044465328,0.009476166044465328,5060,3,27,0,0
++4104,9,event_regime,0,0,0,0,,,5599,6,114,0,1
++4104,9,overshoot_reversal,0,0,0,0,,,5649,6,54,0,1
++4104,9,cross_asset,0,0,0,0,,,5649,6,54,0,1
++4105,9,event_regime,0,0,0,0,,,7051,1,19,0,7
++4105,9,overshoot_reversal,0,0,0,0,,,7095,1,9,0,7
++4105,9,cross_asset,0,0,0,0,,,7095,1,9,0,7
++4106,9,event_regime,15,12,15,3,0.014759360293214304,0.014047180159759838,7100,1,19,0,0
++4106,9,overshoot_reversal,0,0,0,0,,,7150,1,9,0,0
++4106,9,cross_asset,4,4,4,0,0.016954144952567696,0.016954144952567696,7150,1,9,0,0
++4109,5,event_regime,14,0,12,12,,0.01123519319989282,4120,6,101,0,0
++4109,5,overshoot_reversal,0,0,0,0,,,4160,6,51,0,0
++4109,5,cross_asset,6,0,6,6,,0.0019963299774391854,4160,6,51,0,0
++4107,5,event_regime,0,0,0,0,,,5018,3,57,0,2
++4107,5,overshoot_reversal,1,1,1,0,0.0009483501686178286,0.0009483501686178286,5058,3,27,0,2
++4107,5,cross_asset,4,4,4,0,-0.00327211944991343,-0.00327211944991343,5058,3,27,0,2
++4108,5,event_regime,13,11,11,0,0.013897923289164565,0.013897923289164565,5020,3,57,0,0
++4108,5,overshoot_reversal,0,0,0,0,,,5060,3,27,0,0
++4108,5,cross_asset,2,2,2,0,0.013239313593437108,0.013239313593437108,5060,3,27,0,0
++4108,9,event_regime,0,0,0,0,,,5600,6,114,0,0
++4108,9,overshoot_reversal,0,0,0,0,,,5650,6,54,0,0
++4108,9,cross_asset,0,0,0,0,,,5650,6,54,0,0
++4109,9,event_regime,0,0,0,0,,,7100,1,19,0,0
++4109,9,overshoot_reversal,0,0,0,0,,,7150,1,9,0,0
++4109,9,cross_asset,4,4,4,0,-0.008231997614744774,-0.008231997614744774,7150,1,9,0,0
++4107,9,event_regime,0,0,0,0,,,7100,1,19,0,0
++4107,9,overshoot_reversal,0,0,0,0,,,7150,1,9,0,0
++4107,9,cross_asset,0,0,0,0,,,7150,1,9,0,0
++4112,5,event_regime,7,0,5,5,,-0.00229894741005352,4120,6,97,0,0
++4112,5,overshoot_reversal,0,0,0,0,,,4160,6,47,0,0
++4112,5,cross_asset,0,0,0,0,,,4160,6,47,0,0
++4110,5,event_regime,13,3,10,7,0.018284616041107277,0.019279629392371888,4420,5,80,0,0
++4110,5,overshoot_reversal,0,0,0,0,,,4460,5,40,0,0
++4110,5,cross_asset,7,2,7,5,0.01505780859619088,0.010687482859558102,4460,5,40,0,0
++4111,5,event_regime,19,9,13,4,0.018299268035759875,0.02307386674614361,5320,2,38,0,0
++4111,5,overshoot_reversal,0,0,0,0,,,5360,2,18,0,0
++4111,5,cross_asset,1,1,1,0,0.01926303407033436,0.01926303407033436,5360,2,18,0,0
++4111,9,event_regime,15,6,13,7,0.0190782792321806,0.019443767146492395,6200,4,76,0,0
++4111,9,overshoot_reversal,0,0,0,0,,,6250,4,36,0,0
++4111,9,cross_asset,0,0,0,0,,,6250,4,36,0,0
++4112,9,event_regime,15,6,15,9,0.020270361533919146,0.015715261603451974,6500,3,57,0,0
++4112,9,overshoot_reversal,0,0,0,0,,,6550,3,27,0,0
++4112,9,cross_asset,4,2,4,2,0.022881832726551532,0.01513042445148638,6550,3,27,0,0
++4110,9,event_regime,0,0,0,0,,,7099,1,19,0,1
++4110,9,overshoot_reversal,0,0,0,0,,,7149,1,9,0,1
++4110,9,cross_asset,3,3,3,0,-0.0033780759755402956,-0.0033780759755402956,7149,1,9,0,1
++4115,5,event_regime,16,0,12,12,,0.02149742540934252,4120,6,100,0,0
++4115,5,overshoot_reversal,0,0,0,0,,,4160,6,50,0,0
++4115,5,cross_asset,6,0,6,6,,0.0016543927436139156,4160,6,50,0,0
++4114,5,event_regime,17,7,13,6,0.01755122486737775,0.030640950910866535,4720,4,58,0,0
++4114,5,overshoot_reversal,0,0,0,0,,,4760,4,28,0,0
++4114,5,cross_asset,1,0,1,1,,0.0,4760,4,28,0,0
++4113,5,event_regime,8,0,5,5,,0.007533355749603965,5019,3,57,0,1
++4113,5,overshoot_reversal,0,0,0,0,,,5059,3,27,0,1
++4113,5,cross_asset,1,1,1,0,-0.002862689095364135,-0.002862689095364135,5059,3,27,0,1
++4114,9,event_regime,3,0,3,3,,0.017055845548801758,7100,1,19,0,0
++4114,9,overshoot_reversal,0,0,0,0,,,7150,1,9,0,0
++4114,9,cross_asset,0,0,0,0,,,7150,1,9,0,0
++4115,9,event_regime,3,0,2,2,,0.01578997973777624,7100,1,19,0,0
++4115,9,overshoot_reversal,0,0,0,0,,,7150,1,9,0,0
++4115,9,cross_asset,1,1,1,0,-0.008857935773404324,-0.008857935773404324,7150,1,9,0,0
++4116,5,event_regime,0,0,0,0,,,3642,6,38,62,1
++4116,5,overshoot_reversal,0,0,0,0,,,3642,6,18,32,1
++4116,5,cross_asset,0,0,0,0,,,3642,6,18,32,1
++4113,9,event_regime,11,8,10,2,0.0070894639783656566,0.006784531830639917,7100,1,19,0,0
++4113,9,overshoot_reversal,0,0,0,0,,,7150,1,9,0,0
++4113,9,cross_asset,0,0,0,0,,,7150,1,9,0,0
++4117,5,event_regime,14,0,11,11,,0.015128184114752535,3820,7,118,0,0
++4117,5,overshoot_reversal,0,0,0,0,,,3860,7,58,0,0
++4117,5,cross_asset,1,0,1,1,,-0.007836230162631797,3860,7,58,0,0
++4118,5,event_regime,4,0,2,2,,0.020921100026023876,5020,3,57,0,0
++4118,5,overshoot_reversal,0,0,0,0,,,5060,3,27,0,0
++4118,5,cross_asset,0,0,0,0,,,5060,3,27,0,0
++4117,9,event_regime,0,0,0,0,,,5600,6,114,0,0
++4117,9,overshoot_reversal,0,0,0,0,,,5650,6,54,0,0
++4117,9,cross_asset,0,0,0,0,,,5650,6,54,0,0
++4116,9,event_regime,0,0,0,0,,,6799,2,38,0,1
++4116,9,overshoot_reversal,0,0,0,0,,,6849,2,18,0,1
++4116,9,cross_asset,0,0,0,0,,,6849,2,18,0,1
++4118,9,event_regime,12,3,12,9,0.021786871689803682,0.016713098860428433,5900,5,95,0,0
++4118,9,overshoot_reversal,0,0,0,0,,,5950,5,45,0,0
++4118,9,cross_asset,4,1,4,3,0.024649204066972574,0.012982090110208233,5950,5,45,0,0
++4119,5,event_regime,21,0,15,15,,0.02012996015426037,4119,6,99,0,1
++4119,5,overshoot_reversal,0,0,0,0,,,4159,6,49,0,1
++4119,5,cross_asset,11,1,11,10,0.013206937031347454,0.00894872666387414,4159,6,49,0,1
++4119,9,event_regime,11,8,11,3,0.008521544140088266,0.009641346572310335,7099,1,19,0,1
++4119,9,overshoot_reversal,0,0,0,0,,,7149,1,9,0,1
++4119,9,cross_asset,1,0,1,1,,0.011846259104987267,7149,1,9,0,1
+diff --git a/round2/results/completion_tests.xml b/round2/results/completion_tests.xml
+new file mode 100644
+--- /dev/null
++++ b/round2/results/completion_tests.xml
+@@ -0,0 +1 @@
++<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="11" time="0.164" timestamp="2026-10-30T01:42:23.605371-05:00" hostname="MacBook-Pro-3.local"><testcase classname="round2.tests.test_round2" name="test_lag_features_and_publication_time" time="0.001" /><testcase classname="round2.tests.test_round2" name="test_labels_enter_on_later_tick_and_include_both_fees" time="0.001" /><testcase classname="round2.tests.test_round2" name="test_halt_blocks_new_orders" time="0.000" /><testcase classname="round2.tests.test_round2" name="test_requests_are_ioc_and_capped_and_volatility_reduces_size" time="0.000" /><testcase classname="round2.tests.test_round2" name="test_actual_partial_fills_determine_entry_vwap_and_clock" time="0.000" /><testcase classname="round2.tests.test_round2" name="test_allocator_does_not_sum_correlated_forecasts" time="0.000" /><testcase classname="round2.tests.test_round2" name="test_unsupported_family_cannot_manufacture_trade" time="0.000" /><testcase classname="round2.tests.test_labels_review" name="test_intermediate_halt_does_not_select_out_a_loss" time="0.000" /><testcase classname="round2.tests.test_labels_review" name="test_exit_waits_for_resume_and_charges_both_fees" time="0.000" /><testcase classname="round2.tests.test_labels_review" name="test_rejected_arrival_is_zero_not_dropped" time="0.000" /><testcase classname="round2.tests.test_labels_review" name="test_terminal_halt_is_explicitly_censored" time="0.000" /></testsuite></testsuites>

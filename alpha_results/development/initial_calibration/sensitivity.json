@@ -1,0 +1,830 @@
+[
+  {
+    "candidate": "event_momentum:{\"confirmation\":10,\"holding\":120,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 10,
+      "holding": 120,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 459.18254754928057,
+    "mean_excess_no_trade": -27.82506425493678,
+    "std_excess": 27.164673479656635,
+    "selection_score": -41.4074009947651,
+    "failures": 0,
+    "mean_fills": 5.916666666666667,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":10,\"holding\":120,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 10,
+      "holding": 120,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 458.5092812289222,
+    "mean_excess_no_trade": -28.49833057529516,
+    "std_excess": 27.53543648258248,
+    "selection_score": -42.2660488165864,
+    "failures": 0,
+    "mean_fills": 6,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":10,\"holding\":20,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 10,
+      "holding": 20,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 456.4818816855768,
+    "mean_excess_no_trade": -30.525730118640542,
+    "std_excess": 21.965549602138267,
+    "selection_score": -41.50850491970968,
+    "failures": 0,
+    "mean_fills": 5.916666666666667,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":10,\"holding\":20,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 10,
+      "holding": 20,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 456.4818816855768,
+    "mean_excess_no_trade": -30.525730118640542,
+    "std_excess": 21.965549602138267,
+    "selection_score": -41.50850491970968,
+    "failures": 0,
+    "mean_fills": 5.916666666666667,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":10,\"holding\":40,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 10,
+      "holding": 40,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 457.5214449613559,
+    "mean_excess_no_trade": -29.48616684286147,
+    "std_excess": 23.74196961344112,
+    "selection_score": -41.35715164958203,
+    "failures": 0,
+    "mean_fills": 5.916666666666667,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":10,\"holding\":40,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 10,
+      "holding": 40,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 456.8476705808692,
+    "mean_excess_no_trade": -30.15994122334814,
+    "std_excess": 24.250251556136057,
+    "selection_score": -42.28506700141617,
+    "failures": 0,
+    "mean_fills": 6,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":10,\"holding\":60,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 10,
+      "holding": 60,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 457.9805341172614,
+    "mean_excess_no_trade": -29.027077686955938,
+    "std_excess": 24.284573253377776,
+    "selection_score": -41.16936431364483,
+    "failures": 0,
+    "mean_fills": 5.916666666666667,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":10,\"holding\":60,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 10,
+      "holding": 60,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 457.3072677968933,
+    "mean_excess_no_trade": -29.70034400732402,
+    "std_excess": 24.76259302181207,
+    "selection_score": -42.08164051823005,
+    "failures": 0,
+    "mean_fills": 6,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":15,\"holding\":120,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 15,
+      "holding": 120,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 410.8812365310223,
+    "mean_excess_no_trade": -76.12637527319505,
+    "std_excess": 65.35911817653006,
+    "selection_score": -108.80593436146009,
+    "failures": 0,
+    "mean_fills": 4.75,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":15,\"holding\":120,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 15,
+      "holding": 120,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 410.1843263778234,
+    "mean_excess_no_trade": -76.82328542639395,
+    "std_excess": 65.80480845895462,
+    "selection_score": -109.72568965587126,
+    "failures": 0,
+    "mean_fills": 4.833333333333333,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":15,\"holding\":20,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 15,
+      "holding": 20,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 407.8172375198992,
+    "mean_excess_no_trade": -79.19037428431814,
+    "std_excess": 65.42723208774864,
+    "selection_score": -111.90399032819246,
+    "failures": 0,
+    "mean_fills": 4.75,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":15,\"holding\":20,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 15,
+      "holding": 20,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 407.8172375198992,
+    "mean_excess_no_trade": -79.19037428431814,
+    "std_excess": 65.42723208774864,
+    "selection_score": -111.90399032819246,
+    "failures": 0,
+    "mean_fills": 4.75,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":15,\"holding\":40,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 15,
+      "holding": 40,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 409.3418559801721,
+    "mean_excess_no_trade": -77.66575582404523,
+    "std_excess": 64.47776440242384,
+    "selection_score": -109.90463802525716,
+    "failures": 0,
+    "mean_fills": 4.75,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":15,\"holding\":40,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 15,
+      "holding": 40,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 408.64494582697324,
+    "mean_excess_no_trade": -78.36266597724413,
+    "std_excess": 64.93045751533288,
+    "selection_score": -110.82789473491057,
+    "failures": 0,
+    "mean_fills": 4.833333333333333,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":15,\"holding\":60,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 15,
+      "holding": 60,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 409.7547332732138,
+    "mean_excess_no_trade": -77.25287853100356,
+    "std_excess": 64.622920173085,
+    "selection_score": -109.56433861754607,
+    "failures": 0,
+    "mean_fills": 4.75,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":15,\"holding\":60,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 15,
+      "holding": 60,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 409.0578231200052,
+    "mean_excess_no_trade": -77.94978868421215,
+    "std_excess": 65.07586814934837,
+    "selection_score": -110.48772275888633,
+    "failures": 0,
+    "mean_fills": 4.833333333333333,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":3,\"holding\":120,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 3,
+      "holding": 120,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 726.5504966738299,
+    "mean_excess_no_trade": 239.54288486961255,
+    "std_excess": 151.14585479771745,
+    "selection_score": 163.96995747075383,
+    "failures": 0,
+    "mean_fills": 10.916666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":3,\"holding\":120,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 3,
+      "holding": 120,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 725.8315705524001,
+    "mean_excess_no_trade": 238.82395874818272,
+    "std_excess": 151.34314683387373,
+    "selection_score": 163.15238533124585,
+    "failures": 0,
+    "mean_fills": 11,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":3,\"holding\":20,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 3,
+      "holding": 20,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 724.439587884864,
+    "mean_excess_no_trade": 237.43197608064656,
+    "std_excess": 150.80080444392308,
+    "selection_score": 162.03157385868502,
+    "failures": 0,
+    "mean_fills": 10.916666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":3,\"holding\":20,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 3,
+      "holding": 20,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 724.439587884864,
+    "mean_excess_no_trade": 237.43197608064656,
+    "std_excess": 150.80080444392308,
+    "selection_score": 162.03157385868502,
+    "failures": 0,
+    "mean_fills": 10.916666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":3,\"holding\":40,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 3,
+      "holding": 40,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 724.033615934973,
+    "mean_excess_no_trade": 237.0260041307556,
+    "std_excess": 151.25971109019414,
+    "selection_score": 161.39614858565852,
+    "failures": 0,
+    "mean_fills": 10.916666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":3,\"holding\":40,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 3,
+      "holding": 40,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 723.7702690499282,
+    "mean_excess_no_trade": 236.7626572457108,
+    "std_excess": 151.30770114249776,
+    "selection_score": 161.10880667446193,
+    "failures": 0,
+    "mean_fills": 10.916666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":3,\"holding\":60,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 3,
+      "holding": 60,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 725.0184192479428,
+    "mean_excess_no_trade": 238.01080744372544,
+    "std_excess": 150.85063194842124,
+    "selection_score": 162.5854914695148,
+    "failures": 0,
+    "mean_fills": 10.916666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":3,\"holding\":60,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 3,
+      "holding": 60,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 724.2994931266294,
+    "mean_excess_no_trade": 237.29188132241202,
+    "std_excess": 151.0605884436313,
+    "selection_score": 161.7615871005964,
+    "failures": 0,
+    "mean_fills": 11,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":5,\"holding\":120,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 5,
+      "holding": 120,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 591.4684988339528,
+    "mean_excess_no_trade": 104.4608870297355,
+    "std_excess": 53.337653217997556,
+    "selection_score": 77.79206042073673,
+    "failures": 0,
+    "mean_fills": 9.416666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":5,\"holding\":120,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 5,
+      "holding": 120,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 590.737115772703,
+    "mean_excess_no_trade": 103.72950396848562,
+    "std_excess": 53.84718611982992,
+    "selection_score": 76.80591090857065,
+    "failures": 0,
+    "mean_fills": 9.5,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":5,\"holding\":20,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 5,
+      "holding": 20,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 588.9297403530436,
+    "mean_excess_no_trade": 101.92212854882625,
+    "std_excess": 53.3381259117149,
+    "selection_score": 75.2530655929688,
+    "failures": 0,
+    "mean_fills": 9.416666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":5,\"holding\":20,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 5,
+      "holding": 20,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 588.9297403530436,
+    "mean_excess_no_trade": 101.92212854882625,
+    "std_excess": 53.3381259117149,
+    "selection_score": 75.2530655929688,
+    "failures": 0,
+    "mean_fills": 9.416666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":5,\"holding\":40,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 5,
+      "holding": 40,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 589.2973097180584,
+    "mean_excess_no_trade": 102.28969791384104,
+    "std_excess": 54.20566301298161,
+    "selection_score": 75.18686640735024,
+    "failures": 0,
+    "mean_fills": 9.416666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":5,\"holding\":40,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 5,
+      "holding": 40,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 589.3266592415918,
+    "mean_excess_no_trade": 102.31904743737444,
+    "std_excess": 54.667629372752614,
+    "selection_score": 74.98523275099814,
+    "failures": 0,
+    "mean_fills": 9.416666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":5,\"holding\":60,\"trailing\":2.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 5,
+      "holding": 60,
+      "trailing": 2.0
+    },
+    "week": 5,
+    "mean_pnl": 589.8115630092265,
+    "mean_excess_no_trade": 102.80395120500907,
+    "std_excess": 54.0055490056947,
+    "selection_score": 75.80117670216173,
+    "failures": 0,
+    "mean_fills": 9.416666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "event_momentum:{\"confirmation\":5,\"holding\":60,\"trailing\":4.0}",
+    "strategy": "event_momentum",
+    "params": {
+      "confirmation": 5,
+      "holding": 60,
+      "trailing": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 589.0801799480323,
+    "mean_excess_no_trade": 102.07256814381496,
+    "std_excess": 54.54475805699291,
+    "selection_score": 74.8001891153185,
+    "failures": 0,
+    "mean_fills": 9.5,
+    "n": 12
+  },
+  {
+    "candidate": "market_making:{\"skew\":0.5,\"width\":1.0}",
+    "strategy": "market_making",
+    "params": {
+      "width": 1.0,
+      "skew": 0.5
+    },
+    "week": 5,
+    "mean_pnl": 713.943749780267,
+    "mean_excess_no_trade": 226.9361379760497,
+    "std_excess": 604.9230585491317,
+    "selection_score": -75.52539129851615,
+    "failures": 0,
+    "mean_fills": 317.5,
+    "n": 12
+  },
+  {
+    "candidate": "market_making:{\"skew\":0.5,\"width\":1.5}",
+    "strategy": "market_making",
+    "params": {
+      "width": 1.5,
+      "skew": 0.5
+    },
+    "week": 5,
+    "mean_pnl": 418.6919520378433,
+    "mean_excess_no_trade": -68.31565976637405,
+    "std_excess": 433.6174723340271,
+    "selection_score": -285.12439593338763,
+    "failures": 0,
+    "mean_fills": 115.5,
+    "n": 12
+  },
+  {
+    "candidate": "market_making:{\"skew\":0.5,\"width\":2.5}",
+    "strategy": "market_making",
+    "params": {
+      "width": 2.5,
+      "skew": 0.5
+    },
+    "week": 5,
+    "mean_pnl": 378.3068235139435,
+    "mean_excess_no_trade": -108.70078829027382,
+    "std_excess": 282.4808459990994,
+    "selection_score": -249.9412112898235,
+    "failures": 0,
+    "mean_fills": 45,
+    "n": 12
+  },
+  {
+    "candidate": "market_making:{\"skew\":1.5,\"width\":1.0}",
+    "strategy": "market_making",
+    "params": {
+      "width": 1.0,
+      "skew": 1.5
+    },
+    "week": 5,
+    "mean_pnl": 667.2613235013365,
+    "mean_excess_no_trade": 180.2537116971192,
+    "std_excess": 579.3110992729961,
+    "selection_score": -109.40183793937885,
+    "failures": 0,
+    "mean_fills": 326.1666666666667,
+    "n": 12
+  },
+  {
+    "candidate": "market_making:{\"skew\":1.5,\"width\":1.5}",
+    "strategy": "market_making",
+    "params": {
+      "width": 1.5,
+      "skew": 1.5
+    },
+    "week": 5,
+    "mean_pnl": 447.25993020094273,
+    "mean_excess_no_trade": -39.747681603274636,
+    "std_excess": 452.1669391604419,
+    "selection_score": -265.8311511834956,
+    "failures": 0,
+    "mean_fills": 128.91666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "market_making:{\"skew\":1.5,\"width\":2.5}",
+    "strategy": "market_making",
+    "params": {
+      "width": 2.5,
+      "skew": 1.5
+    },
+    "week": 5,
+    "mean_pnl": 485.51420067485014,
+    "mean_excess_no_trade": -1.4934111293672079,
+    "std_excess": 257.74888155427084,
+    "selection_score": -130.36785190650264,
+    "failures": 0,
+    "mean_fills": 51,
+    "n": 12
+  },
+  {
+    "candidate": "post_halt:{\"z\":2.5}",
+    "strategy": "post_halt",
+    "params": {
+      "z": 2.5
+    },
+    "week": 5,
+    "mean_pnl": 485.09576057800587,
+    "mean_excess_no_trade": -1.9118512262114866,
+    "std_excess": 3.702669861093364,
+    "selection_score": -3.7631861567581684,
+    "failures": 0,
+    "mean_fills": 1.0833333333333333,
+    "n": 12
+  },
+  {
+    "candidate": "post_halt:{\"z\":3.0}",
+    "strategy": "post_halt",
+    "params": {
+      "z": 3.0
+    },
+    "week": 5,
+    "mean_pnl": 485.09576057800587,
+    "mean_excess_no_trade": -1.9118512262114866,
+    "std_excess": 3.702669861093364,
+    "selection_score": -3.7631861567581684,
+    "failures": 0,
+    "mean_fills": 1.0833333333333333,
+    "n": 12
+  },
+  {
+    "candidate": "post_halt:{\"z\":3.5}",
+    "strategy": "post_halt",
+    "params": {
+      "z": 3.5
+    },
+    "week": 5,
+    "mean_pnl": 485.09576057800587,
+    "mean_excess_no_trade": -1.9118512262114866,
+    "std_excess": 3.702669861093364,
+    "selection_score": -3.7631861567581684,
+    "failures": 0,
+    "mean_fills": 1.0833333333333333,
+    "n": 12
+  },
+  {
+    "candidate": "post_halt:{\"z\":4.0}",
+    "strategy": "post_halt",
+    "params": {
+      "z": 4.0
+    },
+    "week": 5,
+    "mean_pnl": 485.09576057800587,
+    "mean_excess_no_trade": -1.9118512262114866,
+    "std_excess": 3.702669861093364,
+    "selection_score": -3.7631861567581684,
+    "failures": 0,
+    "mean_fills": 1.0833333333333333,
+    "n": 12
+  },
+  {
+    "candidate": "basket:{\"lookback\":120,\"z\":2.0}",
+    "strategy": "basket",
+    "params": {
+      "z": 2.0,
+      "lookback": 120
+    },
+    "week": 9,
+    "mean_pnl": 566.2282325075406,
+    "mean_excess_no_trade": -2.2272183429377037,
+    "std_excess": 7.715310659034933,
+    "selection_score": -6.084873672455171,
+    "failures": 0,
+    "mean_fills": 0.5,
+    "n": 12
+  },
+  {
+    "candidate": "basket:{\"lookback\":120,\"z\":2.5}",
+    "strategy": "basket",
+    "params": {
+      "z": 2.5,
+      "lookback": 120
+    },
+    "week": 9,
+    "mean_pnl": 567.1976826318229,
+    "mean_excess_no_trade": -1.2577682186553527,
+    "std_excess": 4.357036917712944,
+    "selection_score": -3.4362866775118244,
+    "failures": 0,
+    "mean_fills": 0.16666666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "basket:{\"lookback\":120,\"z\":3.0}",
+    "strategy": "basket",
+    "params": {
+      "z": 3.0,
+      "lookback": 120
+    },
+    "week": 9,
+    "mean_pnl": 567.1976826318229,
+    "mean_excess_no_trade": -1.2577682186553527,
+    "std_excess": 4.357036917712944,
+    "selection_score": -3.4362866775118244,
+    "failures": 0,
+    "mean_fills": 0.16666666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "basket:{\"lookback\":120,\"z\":3.5}",
+    "strategy": "basket",
+    "params": {
+      "z": 3.5,
+      "lookback": 120
+    },
+    "week": 9,
+    "mean_pnl": 567.1976826318229,
+    "mean_excess_no_trade": -1.2577682186553527,
+    "std_excess": 4.357036917712944,
+    "selection_score": -3.4362866775118244,
+    "failures": 0,
+    "mean_fills": 0.16666666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "basket:{\"lookback\":60,\"z\":2.0}",
+    "strategy": "basket",
+    "params": {
+      "z": 2.0,
+      "lookback": 60
+    },
+    "week": 9,
+    "mean_pnl": 567.1976826318229,
+    "mean_excess_no_trade": -1.2577682186553527,
+    "std_excess": 4.357036917712944,
+    "selection_score": -3.4362866775118244,
+    "failures": 0,
+    "mean_fills": 0.16666666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "basket:{\"lookback\":60,\"z\":2.5}",
+    "strategy": "basket",
+    "params": {
+      "z": 2.5,
+      "lookback": 60
+    },
+    "week": 9,
+    "mean_pnl": 567.1976826318229,
+    "mean_excess_no_trade": -1.2577682186553527,
+    "std_excess": 4.357036917712944,
+    "selection_score": -3.4362866775118244,
+    "failures": 0,
+    "mean_fills": 0.16666666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "basket:{\"lookback\":60,\"z\":3.0}",
+    "strategy": "basket",
+    "params": {
+      "z": 3.0,
+      "lookback": 60
+    },
+    "week": 9,
+    "mean_pnl": 567.1976826318229,
+    "mean_excess_no_trade": -1.2577682186553527,
+    "std_excess": 4.357036917712944,
+    "selection_score": -3.4362866775118244,
+    "failures": 0,
+    "mean_fills": 0.16666666666666666,
+    "n": 12
+  },
+  {
+    "candidate": "basket:{\"lookback\":60,\"z\":3.5}",
+    "strategy": "basket",
+    "params": {
+      "z": 3.5,
+      "lookback": 60
+    },
+    "week": 9,
+    "mean_pnl": 567.1976826318229,
+    "mean_excess_no_trade": -1.2577682186553527,
+    "std_excess": 4.357036917712944,
+    "selection_score": -3.4362866775118244,
+    "failures": 0,
+    "mean_fills": 0.16666666666666666,
+    "n": 12
+  }
+]

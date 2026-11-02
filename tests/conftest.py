@@ -57,3 +57,10 @@ def _no_luld_band(monkeypatch):
     import exchange.config as config
     monkeypatch.setattr(config, "LULD_BAND_PCT", 0.0)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_team_ledger_state(monkeypatch, tmp_path):
+    """Never load a running seat's real ledger in an isolated bot test."""
+    import team.trader as team_trader
+    monkeypatch.setattr(team_trader, 'STATE_DIR', tmp_path / 'team_state')

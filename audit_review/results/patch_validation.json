@@ -1,0 +1,29 @@
+{
+  "files": [
+    "audit_review/conftest.py",
+    "audit_review/.gitignore",
+    "audit_review/FILES.md",
+    "audit_review/REPORT.md",
+    "audit_review/issues.json",
+    "audit_review/code/atomic_exchange.py",
+    "audit_review/code/audit_study.py",
+    "audit_review/code/build_report.py",
+    "audit_review/code/event_coverage.py",
+    "audit_review/code/extract_archive.py",
+    "audit_review/code/fifo.py",
+    "audit_review/code/findings.py",
+    "audit_review/code/make_patch.py",
+    "audit_review/code/network_guard.py",
+    "audit_review/code/paired_corrections.py",
+    "audit_review/code/reproduce_history.py",
+    "audit_review/code/run_archive_tests.py",
+    "audit_review/code/run_root_tests.py",
+    "audit_review/code/test_audit.py",
+    "audit_review/code/test_exchange_concurrency.py",
+    "audit_review/code/test_fifo.py",
+    "audit_review/code/validate_outputs.py",
+    "audit_review/code/verify_sources.py"
+  ],
+  "patch_bytes": 143081,
+  "git_apply_check_exit_code": 0
+}

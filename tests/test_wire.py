@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 
 from pydantic import TypeAdapter
 
@@ -42,6 +43,12 @@ def _bot(tmp_path, ws: _FakeWS) -> _Bot:
 def test_orders_leave_as_a_typed_place_order(tmp_path):
     ws = _FakeWS()
     bot = _bot(tmp_path, ws)
+    bot._owner._week5_active = True
+    bot.portfolio.cash = 175000
+    bot.portfolio._net_worth = 175000
+    bot._has_server_snapshot = True
+    bot._snapshot_at = time.monotonic()
+    bot._owner._refs["NVDA"] = 137.5
     asyncio.run(bot._place_order(Signal(symbol="NVDA", side="buy", quantity=5, price=137.5)))
     (frame,) = ws.sent
     msg = CLIENT.validate_json(frame)                  # the exchange's own view of our frame

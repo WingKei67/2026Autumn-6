@@ -740,6 +740,15 @@ class ExchangeServer:
                             data=dict(deal.to_public(), late_join=True),
                         ))
 
+            # Authoritative halt replay for reconnects, including a resume missed
+            # while disconnected. Never infer trading state from socket health.
+            await self._send(websocket, SessionEvent(event="MARKET_STATE",
+                message="Current trading gates", data={
+                    "halted_symbols": sorted(self.circuit_breaker.halted),
+                    "market_halted": self.circuit_breaker.market_halted,
+                    "week": self.scenario.week,
+                }))
+
             # ── Message loop ─────────────────────────────────────────
             async for raw_msg in websocket:
                 try:

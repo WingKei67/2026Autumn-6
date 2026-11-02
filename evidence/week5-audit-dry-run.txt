@@ -1,0 +1,5 @@
+6_rings_trader_1: UNKNOWN — no matching logs
+6_rings_trader_2: UNKNOWN — no matching logs
+6_rings_broker: UNKNOWN — no matching logs
+Positions are observed snapshots; pending-order bounds use independent seat caps: 150+150+20=320 per symbol.
+Missing logs or samples cannot prove absence of violations. Cross-venue/extra-seat activity is outside these bounds.

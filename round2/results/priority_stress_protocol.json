@@ -1,0 +1,71 @@
+{
+  "seeds": [
+    6000,
+    6001,
+    6002,
+    6003,
+    6004,
+    6005,
+    6006,
+    6007,
+    6008,
+    6009,
+    6010,
+    6011,
+    6012,
+    6013,
+    6014,
+    6015,
+    6016,
+    6017,
+    6018,
+    6019
+  ],
+  "weeks": [
+    5,
+    9
+  ],
+  "stresses": [
+    "fees_60bps",
+    "volatile"
+  ],
+  "candidates": [
+    [
+      "event_regime",
+      {
+        "safety": 0.001
+      },
+      "event_regime"
+    ],
+    [
+      "cross_asset",
+      {
+        "safety": 0.001
+      },
+      "cross_asset"
+    ],
+    [
+      "adaptive_allocator",
+      {
+        "safety": 0.001
+      },
+      "adaptive_allocator"
+    ],
+    [
+      "original_active",
+      {},
+      "original_active"
+    ],
+    [
+      "round1_combined",
+      {},
+      "round1_combined"
+    ],
+    [
+      "no_trade",
+      {},
+      "no_trade"
+    ]
+  ],
+  "reason": "Budget-limited completion fixed before test results inspection"
+}

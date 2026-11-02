@@ -1,0 +1,38 @@
+[
+  {
+    "strategy": "event_regime",
+    "safety": 0.001,
+    "mean_increment_vs_original_active": -479.4597519750241,
+    "mean_pnl": 1107.097658216465
+  },
+  {
+    "strategy": "event_regime",
+    "safety": 0.003,
+    "mean_increment_vs_original_active": -501.87222966267075,
+    "mean_pnl": 1084.6851805288184
+  },
+  {
+    "strategy": "cross_asset",
+    "safety": 0.001,
+    "mean_increment_vs_original_active": -1135.3028224509821,
+    "mean_pnl": 451.25458774050713
+  },
+  {
+    "strategy": "cross_asset",
+    "safety": 0.003,
+    "mean_increment_vs_original_active": -1144.380502816372,
+    "mean_pnl": 442.1769073751173
+  },
+  {
+    "strategy": "adaptive_allocator",
+    "safety": 0.001,
+    "mean_increment_vs_original_active": -441.0757137141263,
+    "mean_pnl": 1145.481696477363
+  },
+  {
+    "strategy": "adaptive_allocator",
+    "safety": 0.003,
+    "mean_increment_vs_original_active": -472.2562778579355,
+    "mean_pnl": 1114.3011323335536
+  }
+]

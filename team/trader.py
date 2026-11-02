@@ -18,7 +18,7 @@ Notes:
     ③ No rejects:
          - IOC orders only: any unfilled part is cancelled at once and never
            piles up on the book
-         - at most one order in flight per symbol (sent, fill not yet back)
+         - at most one order in flight per seat, retained until IOC completion
          - update local position and cash on the fill itself, without waiting
            for the PortfolioUpdate that arrives a few ticks later
          - per-seat position cap SEAT_POSITION_CAP (the team's 800-share
@@ -49,6 +49,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import os
 import pathlib
 import random
@@ -62,8 +63,9 @@ import trader.config as _config             # _config.TEAM_ID = the name of this
 from trader.trader import MarketData, _print_startup
 from pydantic import TypeAdapter, ValidationError
 from shared.messages import (AnyExchangeMessage, BookSnapshot, ErrorMsg, Leaderboard, OrderAck,
-                             PlaceOrder, PortfolioUpdate, SessionEvent, TradeExecution)
+                             CancelOrder, PlaceOrder, PortfolioUpdate, SessionEvent, TradeExecution)
 from team.ledger import Ledger
+from team.risk import log_state, acquire_seat_lock
 from week2.week02_alpha_bot import ShockSwitchTrader
 
 # ① A SHOCK carries no ramp shape (ramp_ticks / overshoot): reuse the last CALENDAR_EVENT's
@@ -76,8 +78,13 @@ REACT_AFTER_TICKS = 20        # fallback after 20 venue ticks; grading window is
 REACT_BID_DISCOUNT = 0.02     # that order: a 1-share IOC bid 2% under the best bid (won't fill, just "reacts")
 
 # ③ No rejects
-INFLIGHT_TTL_S = 0.3          # the exchange acks, then fills: 0.3 s after sending, the unfilled rest is cancelled
-SEAT_POSITION_CAP = int(os.environ.get("SEAT_POSITION_CAP", "150"))   # max shares this seat holds per symbol
+SEAT_POSITION_CAP = min(150, max(1, int(os.environ.get("SEAT_POSITION_CAP", "150"))))
+# Phase 2 safety: this trader's long notional cannot consume more than 40% of
+# its registered $175k starting equity. The exchange liquidates below 50%.
+TRADER_STARTING_EQUITY = 175_000.0
+TRADER_GROSS_CAP = 70_000.0
+TRADER_EQUITY_HALT = 0.70 * TRADER_STARTING_EQUITY
+BUY_FEE_BUFFER = 0.005  # worst-case local allowance beyond published taker fee
 AUCTION_EVENTS = ("SESSION_PREOPEN", "SESSION_PRECLOSE")   # auctions accept limit orders only; we stay out
 
 # ④ IPO
@@ -109,6 +116,13 @@ class MyTrader(ShockSwitchTrader):
         self._inflight: dict[str, list] = {}                  # orders in flight: symbol → [side, unfilled qty, sent at]
         self._refs: dict[str, float] = {}                     # symbol → the exchange's fair price ref_price (for SHOCK)
         self._portfolio = None                                # set by _Bot: on_ipo gets no portfolio argument
+        self._halted_symbols: set[str] = set()
+        self._halt_until = {}
+        self._market_halted = False
+        self._week5_active = False  # avoid consuming risk in open play
+        self._resume_pending: set[str] = set()
+        self._resume_sent: set[str] = set()  # ACKs must correspond to POST-resume orders
+        self._resume_retry_after: float = 0.0  # avoid rapid-fire rejected probes after reconnect
 
     # ------------------------------------------------------------------
     # Exchange events
@@ -126,6 +140,10 @@ class MyTrader(ShockSwitchTrader):
           skip the exchange's position check, but every later order (sells
           included) must respect the team limit, so never bid above the cap.
         """
+        # Primary-market allocations bypass normal order risk checks. Week 5
+        # has no IPO event; keep this unrelated exposure path closed.
+        if self._week5_active:
+            return None
         pf = self._portfolio
         pos = int(pf.positions.get(symbol, 0)) if pf else 0
         qty = min(SEAT_POSITION_CAP - max(pos, 0), shares)    # room left under the cap, at most the deal size
@@ -142,6 +160,58 @@ class MyTrader(ShockSwitchTrader):
     def on_event(self, event: str, message: str, data: dict) -> None:
         """Market news arrives here (CALENDAR_EVENT, SHOCK, DIVIDEND, IPO_* …).
         The parent only handles CALENDAR_EVENT; we do our part first."""
+        # The live server switches from open play to Week 5 at 17:00:20.
+        # Throw away any old Week-0 trading plans, but NOT real inventory.
+        if event == "WEEK_CHANGED":
+            self._week5_active = int(data.get("week", 0)) == 5
+            self.plans.clear()
+            self._unanswered.clear()
+            self._resume_pending.clear()
+            self._resume_sent.clear()
+            self._halted_symbols.clear()
+            self._market_halted = False
+            logging.info("RISK WEEK %02d — old plans cleared; graded=%s",
+                         int(data.get("week", 0)), self._week5_active)
+            return
+        # Week 5: disable ALL new orders while a circuit breaker is active.
+        if event == "TRADING_HALT":
+            symbol = data.get("symbol")
+            if symbol:
+                self._halted_symbols.add(symbol)
+                self._halt_until[symbol] = float(data.get("resume_at", float("inf")))
+                self._resume_pending.discard(symbol)
+                self._resume_sent.discard(symbol)
+                logging.warning("RISK HALT %s — all orders paused", symbol)
+            return
+        if event == "TRADING_RESUMED":
+            self._resume_retry_after = 0.0
+            symbol = data.get("symbol")
+            if symbol:
+                self._halted_symbols.discard(symbol)
+                self._resume_pending.add(symbol)
+                self._resume_sent.discard(symbol)
+                logging.info("RISK RESUMED %s — will submit a 1-share test order", symbol)
+            return
+        if event == "MARKET_HALT":
+            self._market_halted = True
+            logging.warning("RISK MARKET HALT — all orders paused")
+            return
+        if event == "MARKET_RESUMED":
+            self._resume_retry_after = 0.0
+            self._market_halted = False
+            self._resume_pending.update(self._mids)
+            self._resume_sent.clear()
+            logging.info("RISK MARKET RESUMED — trading enabled")
+            return
+        if event == "LIQUIDATION":
+            logging.info("LIQUIDATION notice team=%s ours=%s", data.get("team_id"),
+                         data.get("team_id") == _config.TEAM_ID)
+            # LIQUIDATION is broadcast to EVERY connected bot; do not stop
+            # trading because someone else's account was liquidated.
+            if data.get("team_id") == _config.TEAM_ID:
+                logging.error("RISK CRITICAL: OUR account liquidated — stop entries")
+                self._market_halted = True
+            return
         # An event that names symbols → remember it for the ② reaction guarantee
         if data.get("tick") is not None:
             self._venue_tick = int(data["tick"])
@@ -189,9 +259,12 @@ class MyTrader(ShockSwitchTrader):
             bot._resync or bot._first_book
         ):
             return None
+        if self._market_halted:
+            return None
         now = self.now()
-        # 1. Forget orders in flight for longer than INFLIGHT_TTL_S: the IOC's unfilled rest is long cancelled
-        self._inflight = {s: f for s, f in self._inflight.items() if now - f[2] < INFLIGHT_TTL_S}
+        # 1. Keep unconfirmed orders reserved, regardless of network delay.
+        # Never expire risk by wall clock: a delayed IOC may still execute.
+        # Release its remainder only after the venue confirms its ID is absent.
         # 2. Correct the parent's count: in the derisk (sell-down) phase it uses core_sent as
         #    "shares sent to sell", but an IOC may not fill, so count only what actually sold
         #    plus what is still in flight
@@ -200,21 +273,65 @@ class MyTrader(ShockSwitchTrader):
                 f = self._inflight.get(sym)
                 p.core_sent = p.core_sold + (f[1] if f and f[0] == "sell" else 0)
         # 3. Ask the parent's strategy first; if it has nothing, check the ② reaction guarantee
-        sig = super().on_tick(market, portfolio) or self._react(market, portfolio)
+        sig = (self._resumption_order(market, portfolio)
+               or super().on_tick(market, portfolio)
+               or self._react(market, portfolio))
         # 4. An order for this symbol is still in flight → wait for its fill (never double-send)
-        if sig is None or sig.symbol in self._inflight:
+        if sig is None or sig.symbol in self._inflight or sig.symbol in self._halted_symbols:
             return None
         return sig
 
     def _step(self, plan, market, portfolio, nw, halted):
         bot = getattr(self, "_bot", None)
-        if bot is not None and plan.symbol in bot._entry_from_board:
+        if (plan.symbol in self._halted_symbols or self._market_halted or
+                (bot is not None and plan.symbol in bot._entry_from_board)):
             return None, 0.0
         return super()._step(plan, market, portfolio, nw, halted)
 
     def _size(self, sym: str, px: float, nw: float, pos: int) -> int:
         """The parent's size, capped so the seat never exceeds its share of the team limit."""
         return max(0, min(super()._size(sym, px, nw, pos), SEAT_POSITION_CAP - max(pos, 0)))
+
+    def _resumption_order(self, market, portfolio):
+        """Prove the order path reopened without violating the Week 5 8% LULD collar.
+
+        The pre-halt order book can be stale. Prefer a marketable 1-share IOC
+        only when its price is within 6% of the venue reference. Otherwise send
+        a passive IOC at 99% of the reference, which can ACK without filling.
+        The final outbound risk guard still enforces cash / position / exposure.
+        """
+        if self.now() < self._resume_retry_after:
+            return None
+        for sym in sorted(self._resume_pending - self._resume_sent):
+            if sym in self._halted_symbols or sym in self._inflight:
+                continue
+            bot = getattr(self, "_bot", None)
+            if bot is not None and sym in bot._entry_from_board:
+                continue
+            ref = float(self._refs.get(sym) or market.mid_price(sym) or 0.0)
+            if ref <= 0:
+                continue
+            # A reducing sell remains eligible at a full share/notional cap
+            # or at the cash/equity entry floor. Prefer it for resumption.
+            if int(portfolio.positions.get(sym, 0)) > 0:
+                bid = market.best_bid(sym)
+                price = (round(bid * .999, 2) if bid and .94 * ref <= bid <= 1.055 * ref
+                         else round(ref * 1.01, 2))
+                return Signal(symbol=sym, side="sell", quantity=1, price=price)
+            ask = market.best_ask(sym)
+            price = round(ask * 1.001, 2) if ask and 0.94 * ref <= ask <= 1.055 * ref else None
+            if price and price <= 1.065 * ref and portfolio.can_buy(sym, 1, price * 1.01):
+                return Signal(symbol=sym, side="buy", quantity=1, price=price)
+            bid = market.best_bid(sym)
+            if bid and int(portfolio.positions.get(sym, 0)) > 0 and 0.94 * ref <= bid <= 1.055 * ref:
+                return Signal(symbol=sym, side="sell", quantity=1,
+                              price=round(max(0.94 * ref, bid * 0.999), 2))
+            # When the book is torn by the halt, an accepted passive IOC
+            # is safer than blindly crossing a stale quote.
+            price = round(ref * 0.99, 2)
+            if price > 0 and portfolio.can_buy(sym, 1, price * 1.01):
+                return Signal(symbol=sym, side="buy", quantity=1, price=price)
+        return None
 
     def _react(self, market, portfolio):
         """② A 1-share bid well under the market for an event nothing else answered
@@ -224,6 +341,8 @@ class MyTrader(ShockSwitchTrader):
             if now - t < REACT_AFTER_TICKS:
                 continue                    # too early: the parent may still trade it
             for sym in sorted(syms):
+                if self._market_halted or sym in self._halted_symbols:
+                    continue
                 bot = getattr(self, "_bot", None)
                 if bot is not None and sym in bot._entry_from_board:
                     continue
@@ -248,14 +367,24 @@ class MyTrader(ShockSwitchTrader):
         if f and f[0] == side:
             f[1] -= quantity                 # take the filled part off the in-flight quantity
             if f[1] <= 0:
-                del self._inflight[symbol]   # fully filled → this symbol may send its next order
+                f[1] = 0  # retain the slot until terminal confirmation
+                # del self._inflight[symbol]   # fully filled → this symbol may send its next order
 
     def on_reconnect(self) -> None:
-        """New socket: orders in flight on the old one are gone (an IOC is already done)."""
+        """Avoid stale halt locks if TRADING_RESUMED occurred while disconnected."""
         self._inflight.clear()
+        self._resume_sent.clear()
+        if self._halted_symbols:
+            self._resume_pending.update(self._halted_symbols)
+            self._resume_retry_after = self.now() + 5.0
+        # Preserve known halts across connection loss. A replayed market state
+        # or TRADING_RESUMED is authoritative; connection is not resumption.
+        # New socket first waits for a fresh portfolio and book snapshot.
+
 
     def run(self) -> None:
         """Connect and trade; log to the terminal (coloured) AND to logs/<seat>_<time>.log (plain)."""
+        self._seat_lock = acquire_seat_lock(_config.TEAM_ID)
         LOG_DIR.mkdir(exist_ok=True)
         logfile = LOG_DIR / f"{_config.TEAM_ID}_{time.strftime('%Y%m%d_%H%M%S')}.log"
         plain = logging.Formatter("%(asctime)s %(levelname)-7s %(message)s", datefmt="%H:%M:%S")
@@ -330,6 +459,7 @@ class _Bot(_AdaptedTraderBot):
         self.rejects = 0
         self._connects = 0
         self._resync = False        # next PortfolioUpdate / leaderboard row: rebuild the books from the exchange
+        self._has_server_snapshot = False  # don't trust the SDK's placeholder $100k on live connect
         self._first_book = False    # next BookSnapshot: log that the book was rebuilt
         self._closing = False       # next PortfolioUpdate / leaderboard row after the close: reconcile
         self._last_row: dict | None = None   # our latest leaderboard row = what the dashboard shows
@@ -340,6 +470,11 @@ class _Bot(_AdaptedTraderBot):
         self._entry_from_board: set[str] = set()   # symbols whose entry the next leaderboard row sets
         self._t0 = time.monotonic()
         self._dropped = False
+        self._acked_orders = set()
+        self._terminal_orders = {}
+        self._seen_trades = set()
+        self._snapshot_at = 0.0
+        self._board_tick = -1
 
     # ── Connection: exponential backoff + jitter ─────────────────────────
 
@@ -356,6 +491,9 @@ class _Bot(_AdaptedTraderBot):
                 self.market = _RefMarket(self._owner._refs)     # the old book is stale: rebuild from new snapshots
                 self._owner.on_reconnect()
                 self._resync = self._first_book = True
+                self._has_server_snapshot = False
+                self._terminal_orders.clear()
+                self._board_tick = -1
                 tasks = [asyncio.create_task(self.trading_loop()),
                          asyncio.create_task(self._housekeeping())]
                 try:
@@ -419,22 +557,61 @@ class _Bot(_AdaptedTraderBot):
                 self.market.update_trade(msg)
                 self._on_trade(msg)
             elif isinstance(msg, PortfolioUpdate):
+                if msg.team_id != _config.TEAM_ID:
+                    continue
                 self.portfolio.apply_server_update(msg)
                 self._on_portfolio(msg)
             elif isinstance(msg, SessionEvent):
                 await self._on_session_event(msg)
             elif isinstance(msg, OrderAck):
+                if msg.team_id != _config.TEAM_ID:
+                    continue
+                if msg.order_id in self._acked_orders:
+                    continue
+                self._acked_orders.add(msg.order_id)
+                self._terminal_orders[msg.order_id] = msg.symbol
+                # Same socket requests are processed serially. IOC has finished
+                # matching before this cancel is handled. ORDER_NOT_FOUND for
+                # this exact ID proves all its fill messages preceded the reply.
+                await self._send(CancelOrder(team_id=_config.TEAM_ID,
+                    symbol=msg.symbol, order_id=msg.order_id))
                 self._owner._unanswered = [
                     (tick, symbols) for tick, symbols in self._owner._unanswered
                     if msg.symbol not in symbols
                 ]
+                if msg.symbol in self._owner._resume_sent:
+                    self._owner._resume_sent.discard(msg.symbol)
+                    self._owner._resume_pending.discard(msg.symbol)
+                    logging.info("RISK RESUME CONFIRMED %s via post-resume order ACK", msg.symbol)
                 logging.info("ACK %s %s %d %s @ %.2f", msg.order_id[:8],
                              msg.side, msg.quantity, msg.symbol, msg.price)
             elif isinstance(msg, ErrorMsg):
+                if self._confirm_terminal(msg):
+                    continue
+                self._has_server_snapshot = False
+                if self._ws is not None:
+                    await self._ws.close()
                 self.rejects += 1
                 logging.warning("REJECT #%d [%s] %s", self.rejects, msg.code, msg.message)
+                # An IOC reject has no order_id on the wire. Permit a later
+                # resumption retry rather than claiming the rejected probe
+                # established that trading reopened.
+                self._owner._resume_sent.clear()
+                if self._owner._resume_pending:
+                    self._owner._resume_retry_after = self._owner.now() + 5.0
             elif isinstance(msg, Leaderboard):
                 self._on_leaderboard(msg)
+
+    def _confirm_terminal(self, msg):
+        if msg.code != "ORDER_NOT_FOUND":
+            return False
+        for oid, sym in list(self._terminal_orders.items()):
+            if repr(oid) in msg.message:
+                self._terminal_orders.pop(oid)
+                self._owner._inflight.pop(sym, None)
+                logging.info("IOC COMPLETE %s %s", sym, oid[:8])
+                return True
+        return False
 
     def _on_trade(self, msg: TradeExecution) -> None:
         """A trade printed. If it is ours: books first (authoritative), then patch
@@ -444,8 +621,11 @@ class _Bot(_AdaptedTraderBot):
         next sell would be sized on a stale position and could turn into a short.
         """
         me = _config.TEAM_ID
+        if msg.trade_id in self._seen_trades:
+            return
         if me not in (msg.buyer_id, msg.seller_id):
             return                               # someone else's trade
+        self._seen_trades.add(msg.trade_id)
         side = "buy" if msg.buyer_id == me else "sell"
         # The stock _on_trade only logs (with fee / 2, which is wrong: fee is the
         # full taker fee) and calls on_fill — so call on_fill directly instead
@@ -477,7 +657,12 @@ class _Bot(_AdaptedTraderBot):
 
     def _on_portfolio(self, msg: PortfolioUpdate) -> None:
         """Recover state, book confirmed IPO allocations and starting grants."""
+        if msg.team_id != _config.TEAM_ID:
+            return
+        self._snapshot_at = time.monotonic()
         state = self._update_state(msg)
+        self._has_server_snapshot = True
+        self.portfolio.apply_server_update(msg)
         if self._resync:
             self._sync("PortfolioUpdate", state)
             return
@@ -506,6 +691,9 @@ class _Bot(_AdaptedTraderBot):
         Also logs one TICK line per broadcast (replaces the stock rich print,
         whose rank was always "#?": the rows carry no rank, the list order is it).
         """
+        if msg.tick < self._board_tick:
+            return
+        self._board_tick = msg.tick
         self._owner._venue_tick = msg.tick
         for board in (msg.traders, msg.brokers):     # each list is sorted by net worth
             rank = next((i for i, e in enumerate(board, 1)
@@ -515,7 +703,9 @@ class _Bot(_AdaptedTraderBot):
                 break
         else:
             return
+        self._snapshot_at = time.monotonic()
         self._last_row = row
+        self._has_server_snapshot = True
         self.portfolio.apply_server_update(PortfolioUpdate(
             team_id=_config.TEAM_ID,
             cash=float(row["cash"]),
@@ -537,6 +727,8 @@ class _Bot(_AdaptedTraderBot):
         logging.info("TICK %d · rank %d/%d · net_worth %s · realized %s · unrealized %s",
                      msg.tick, rank, len(board), f"{row.get('net_worth', 0.0):,.2f}",
                      f"{row.get('realized_pnl', 0.0):+,.2f}", f"{row.get('unrealized_pnl', 0.0):+,.2f}")
+        log_state(_config.TEAM_ID, self.portfolio.positions, self._owner._refs,
+                  self.portfolio.cash, self.portfolio._net_worth, msg.traders + msg.brokers)
         state = self._row_state(row)
         if self._resync:
             self._sync("leaderboard", state)
@@ -720,22 +912,60 @@ class _Bot(_AdaptedTraderBot):
         """Apply final position guards, then send a typed IOC order."""
         if (
             self.auction
+            or not self._owner._week5_active
             or not self._session_open
             or self._resync
             or self._first_book
             or signal.symbol in self._entry_from_board
+            or self._owner._market_halted
+            or signal.symbol in self._owner._halted_symbols
+            or not self._has_server_snapshot
+            or time.monotonic() - self._snapshot_at > 10.0
+            or getattr(self.portfolio, "liquidated", False)
         ):
             return
 
-        if signal.symbol in self._owner._inflight:
+        if self._owner._inflight:
             return
 
+        if not math.isfinite(signal.price) or signal.price <= 0:
+            return
         pos = self.portfolio.positions.get(signal.symbol, 0)
 
         if signal.side == "buy":
+            # A hard limit checked at the FINAL outbound order boundary, not
+            # just when generating a signal. Long-only and cash-funded.
+            refs = self._owner._refs
+            marks = {sym: (refs.get(sym) or self.market.mid_price(sym) or 0.0)
+                     for sym, q in self.portfolio.positions.items() if q}
+            # Unknown marks cannot be treated as zero risk.
+            if any(px <= 0 for px in marks.values()):
+                logging.warning("RISK UNKNOWN MARK: refusing new buy until positions priced")
+                return
+            gross = sum(abs(int(q)) * marks[sym]
+                        for sym, q in self.portfolio.positions.items() if q)
+            # Reserve risk for IOC orders already sent on OTHER symbols but
+            # not yet filled or ACKed. Otherwise concurrent events can each
+            # spend the same gross/cash budget.
+            pending_buy = sum(
+                max(0, f[1]) * (f[3] if len(f) > 3 else (refs.get(sym) or self.market.mid_price(sym) or 0.0))
+                for sym, f in self._owner._inflight.items() if f[0] == "buy"
+            )
+            if any((refs.get(sym) or self.market.mid_price(sym) or 0) <= 0
+                   for sym, f in self._owner._inflight.items() if f[0] == "buy"):
+                return
+            fee = max(float(self._owner.taker), BUY_FEE_BUFFER)
+            available_cash = max(0.0, (self.portfolio.cash - 0.60 * TRADER_STARTING_EQUITY - pending_buy * (1 + fee)) * 0.95)
+            gross_room = max(0.0, TRADER_GROSS_CAP - gross - pending_buy)
+            equity = self.portfolio.net_worth(self.market)
+            if self._has_server_snapshot and (not equity or equity < TRADER_EQUITY_HALT):
+                return
             qty = min(
                 signal.quantity,
                 max(0, SEAT_POSITION_CAP - pos),
+                int(gross_room // max(signal.price, refs.get(signal.symbol, signal.price))) if signal.price > 0 else 0,
+                int(available_cash // (signal.price * (1 + fee)))
+                if signal.price > 0 else 0,
             )
         else:
             # This strategy sells existing long inventory.
@@ -743,9 +973,19 @@ class _Bot(_AdaptedTraderBot):
 
         if qty <= 0:
             return
+        # Week 5 limits limit/IOC orders to +/-8% of the reference. Reject
+        # our own stale or invalid prices before risking a venue PRICE_BAND.
+        ref = self._owner._refs.get(signal.symbol) or self.market.mid_price(signal.symbol)
+        if not ref or signal.price <= 0 or not 0.93 * ref <= signal.price <= 1.07 * ref:
+            logging.info("RISK PRICE BAND skip %s %s @ %.2f ref=%.2f",
+                         signal.symbol, signal.side, signal.price, ref or 0)
+            return
 
         signal = signal.model_copy(update={"quantity": qty})
         self._owner.on_sent(signal)
+        self._owner._inflight[signal.symbol].append(signal.price)
+        if signal.symbol in self._owner._resume_pending:
+            self._owner._resume_sent.add(signal.symbol)
 
         logging.info(
             "Order sent: %s %d %s @ %.2f (IOC)",
@@ -764,6 +1004,21 @@ class _Bot(_AdaptedTraderBot):
     async def _on_session_event(self, msg) -> None:
         """Auction gate, IPO/dividend bookkeeping, close-of-session reconcile."""
         d = msg.data or {}
+        if msg.event == "MARKET_STATE":
+            previously = set(self._owner._halted_symbols)
+            market_was_halted = self._owner._market_halted
+            self._owner._halted_symbols = set(d.get("halted_symbols", []))
+            self._owner._market_halted = bool(d.get("market_halted", False))
+            self._owner._resume_pending.update(previously - self._owner._halted_symbols)
+            if market_was_halted and not self._owner._market_halted:
+                self._owner._resume_pending.update(self._owner._refs)
+        if msg.event == "SESSION_OPEN":
+            # A reconnect does not necessarily replay WEEK_CHANGED.
+            week = d.get("week", (d.get("scenario") or {}).get("week"))
+            if week is not None:
+                self._owner._week5_active = int(week) == 5
+                logging.info("RISK SESSION WEEK %02d graded=%s",
+                             int(week), self._owner._week5_active)
         if msg.event in AUCTION_EVENTS:
             self.auction = True
         elif msg.event in ("SESSION_OPEN", "SESSION_CLOSED"):

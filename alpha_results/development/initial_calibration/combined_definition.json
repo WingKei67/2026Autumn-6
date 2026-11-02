@@ -1,0 +1,21 @@
+{
+  "name": "combined",
+  "params": {},
+  "key": "combined",
+  "components": [
+    [
+      "event_momentum",
+      {
+        "confirmation": 3,
+        "holding": 120,
+        "trailing": 2.0
+      }
+    ],
+    [
+      "post_halt",
+      {
+        "z": 2.5
+      }
+    ]
+  ]
+}

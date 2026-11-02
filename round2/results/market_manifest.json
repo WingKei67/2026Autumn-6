@@ -1,0 +1,842 @@
+[
+  {
+    "seed": 4003,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4003_9.npz",
+    "rows": 7500,
+    "pnl": -597.6112812833162
+  },
+  {
+    "seed": 4001,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4001_5.npz",
+    "rows": 6000,
+    "pnl": 1050.6874652377155
+  },
+  {
+    "seed": 4000,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4000_5.npz",
+    "rows": 6000,
+    "pnl": 1580.7684177231276
+  },
+  {
+    "seed": 4003,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4003_5.npz",
+    "rows": 6000,
+    "pnl": -848.0835001168889
+  },
+  {
+    "seed": 4001,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4001_9.npz",
+    "rows": 7500,
+    "pnl": 93.72639280743897
+  },
+  {
+    "seed": 4002,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4002_5.npz",
+    "rows": 6000,
+    "pnl": 417.6718571012316
+  },
+  {
+    "seed": 4000,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4000_9.npz",
+    "rows": 7500,
+    "pnl": 1040.3961037407862
+  },
+  {
+    "seed": 4004,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4004_5.npz",
+    "rows": 6000,
+    "pnl": 1508.8260641990637
+  },
+  {
+    "seed": 4002,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4002_9.npz",
+    "rows": 7497,
+    "pnl": 1263.507529327384
+  },
+  {
+    "seed": 4005,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4005_5.npz",
+    "rows": 5999,
+    "pnl": -770.0918219498708
+  },
+  {
+    "seed": 4004,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4004_9.npz",
+    "rows": 7500,
+    "pnl": 1040.6363136344007
+  },
+  {
+    "seed": 4006,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4006_5.npz",
+    "rows": 5986,
+    "pnl": 142.66198450131924
+  },
+  {
+    "seed": 4007,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4007_5.npz",
+    "rows": 6000,
+    "pnl": 1108.6825176539714
+  },
+  {
+    "seed": 4005,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4005_9.npz",
+    "rows": 7198,
+    "pnl": -372.59493718182785
+  },
+  {
+    "seed": 4007,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4007_9.npz",
+    "rows": 7500,
+    "pnl": 116.93520642272779
+  },
+  {
+    "seed": 4006,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4006_9.npz",
+    "rows": 7500,
+    "pnl": 1137.5050599193492
+  },
+  {
+    "seed": 4008,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4008_5.npz",
+    "rows": 5999,
+    "pnl": 1664.7911457327136
+  },
+  {
+    "seed": 4009,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4009_5.npz",
+    "rows": 6000,
+    "pnl": 748.0227272759075
+  },
+  {
+    "seed": 4010,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4010_5.npz",
+    "rows": 6000,
+    "pnl": 1691.7209317042143
+  },
+  {
+    "seed": 4010,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4010_9.npz",
+    "rows": 7500,
+    "pnl": 1245.0614038627245
+  },
+  {
+    "seed": 4012,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4012_5.npz",
+    "rows": 6000,
+    "pnl": 136.5265876102203
+  },
+  {
+    "seed": 4009,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4009_9.npz",
+    "rows": 7500,
+    "pnl": -195.49443888684618
+  },
+  {
+    "seed": 4008,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4008_9.npz",
+    "rows": 7497,
+    "pnl": 1126.5572927342437
+  },
+  {
+    "seed": 4011,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4011_5.npz",
+    "rows": 5999,
+    "pnl": -660.6410401375033
+  },
+  {
+    "seed": 4013,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4013_5.npz",
+    "rows": 6000,
+    "pnl": 720.1807025136368
+  },
+  {
+    "seed": 4012,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4012_9.npz",
+    "rows": 7500,
+    "pnl": 1274.4934613848745
+  },
+  {
+    "seed": 4013,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4013_9.npz",
+    "rows": 7500,
+    "pnl": -175.46771120018093
+  },
+  {
+    "seed": 4011,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4011_9.npz",
+    "rows": 7499,
+    "pnl": 53.789108771656174
+  },
+  {
+    "seed": 4015,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4015_5.npz",
+    "rows": 6000,
+    "pnl": 1642.9039251850627
+  },
+  {
+    "seed": 4014,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4014_5.npz",
+    "rows": 6000,
+    "pnl": 537.453839763999
+  },
+  {
+    "seed": 4016,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4016_5.npz",
+    "rows": 6000,
+    "pnl": -550.105859764968
+  },
+  {
+    "seed": 4014,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4014_9.npz",
+    "rows": 7499,
+    "pnl": 1627.440380339278
+  },
+  {
+    "seed": 4015,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4015_9.npz",
+    "rows": 7500,
+    "pnl": 1152.5193807212636
+  },
+  {
+    "seed": 4016,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4016_9.npz",
+    "rows": 7500,
+    "pnl": 130.19804029216175
+  },
+  {
+    "seed": 4019,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4019_5.npz",
+    "rows": 6000,
+    "pnl": 1129.0285136379825
+  },
+  {
+    "seed": 4018,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4018_5.npz",
+    "rows": 6000,
+    "pnl": 216.06646569800796
+  },
+  {
+    "seed": 4017,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4017_5.npz",
+    "rows": 5998,
+    "pnl": 1706.643558555108
+  },
+  {
+    "seed": 4017,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4017_9.npz",
+    "rows": 7499,
+    "pnl": 1441.4759100538213
+  },
+  {
+    "seed": 4018,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4018_9.npz",
+    "rows": 7500,
+    "pnl": 1304.8579208168958
+  },
+  {
+    "seed": 4019,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4019_9.npz",
+    "rows": 7500,
+    "pnl": 521.0183584489278
+  },
+  {
+    "seed": 4020,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4020_5.npz",
+    "rows": 5999,
+    "pnl": 842.0143212258699
+  },
+  {
+    "seed": 4022,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4022_5.npz",
+    "rows": 6000,
+    "pnl": 1851.9646920038213
+  },
+  {
+    "seed": 4021,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4021_5.npz",
+    "rows": 6000,
+    "pnl": 355.00880099862115
+  },
+  {
+    "seed": 4021,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4021_9.npz",
+    "rows": 7500,
+    "pnl": 1235.049895522854
+  },
+  {
+    "seed": 4020,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4020_9.npz",
+    "rows": 7497,
+    "pnl": 124.26605085047777
+  },
+  {
+    "seed": 4022,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4022_9.npz",
+    "rows": 7500,
+    "pnl": 1207.917721279955
+  },
+  {
+    "seed": 4025,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4025_5.npz",
+    "rows": 5908,
+    "pnl": 1736.1541035150003
+  },
+  {
+    "seed": 4024,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4024_5.npz",
+    "rows": 6000,
+    "pnl": 948.41841646799
+  },
+  {
+    "seed": 4023,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4023_5.npz",
+    "rows": 5999,
+    "pnl": 1313.9100700261479
+  },
+  {
+    "seed": 4025,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4025_9.npz",
+    "rows": 7500,
+    "pnl": 1030.2800676301413
+  },
+  {
+    "seed": 4024,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4024_9.npz",
+    "rows": 7500,
+    "pnl": 16.433522393374005
+  },
+  {
+    "seed": 4023,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4023_9.npz",
+    "rows": 7499,
+    "pnl": 802.8268300782656
+  },
+  {
+    "seed": 4026,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4026_5.npz",
+    "rows": 5999,
+    "pnl": 213.65442753396928
+  },
+  {
+    "seed": 4028,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4028_5.npz",
+    "rows": 6000,
+    "pnl": 1737.9883879097179
+  },
+  {
+    "seed": 4027,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4027_5.npz",
+    "rows": 6000,
+    "pnl": 120.93819971196353
+  },
+  {
+    "seed": 4026,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4026_9.npz",
+    "rows": 7499,
+    "pnl": 1311.1921909080993
+  },
+  {
+    "seed": 4027,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4027_9.npz",
+    "rows": 7500,
+    "pnl": 508.66311751521425
+  },
+  {
+    "seed": 4028,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4028_9.npz",
+    "rows": 7500,
+    "pnl": 1287.9360646432906
+  },
+  {
+    "seed": 4030,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4030_5.npz",
+    "rows": 6000,
+    "pnl": 143.0663634710363
+  },
+  {
+    "seed": 4029,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4029_5.npz",
+    "rows": 6000,
+    "pnl": 271.90784680462093
+  },
+  {
+    "seed": 4031,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4031_5.npz",
+    "rows": 6000,
+    "pnl": 47.297606987849576
+  },
+  {
+    "seed": 4030,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4030_9.npz",
+    "rows": 7500,
+    "pnl": 1239.9542166645406
+  },
+  {
+    "seed": 4029,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4029_9.npz",
+    "rows": 7497,
+    "pnl": 1321.229616533412
+  },
+  {
+    "seed": 4031,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4031_9.npz",
+    "rows": 7500,
+    "pnl": 1278.0686523997574
+  },
+  {
+    "seed": 4032,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4032_5.npz",
+    "rows": 5999,
+    "pnl": -744.1806496975187
+  },
+  {
+    "seed": 4033,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4033_5.npz",
+    "rows": 6000,
+    "pnl": 1877.661572137411
+  },
+  {
+    "seed": 4034,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4034_5.npz",
+    "rows": 6000,
+    "pnl": -579.7191047097149
+  },
+  {
+    "seed": 4032,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4032_9.npz",
+    "rows": 7499,
+    "pnl": -343.28633479814744
+  },
+  {
+    "seed": 4033,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4033_9.npz",
+    "rows": 7500,
+    "pnl": 1224.1667241294053
+  },
+  {
+    "seed": 4034,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4034_9.npz",
+    "rows": 7500,
+    "pnl": -157.15002672132687
+  },
+  {
+    "seed": 4037,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4037_5.npz",
+    "rows": 6000,
+    "pnl": 105.12598044762854
+  },
+  {
+    "seed": 4035,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4035_5.npz",
+    "rows": 5999,
+    "pnl": -399.9985762811557
+  },
+  {
+    "seed": 4036,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4036_5.npz",
+    "rows": 6000,
+    "pnl": -301.2306959031266
+  },
+  {
+    "seed": 4036,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4036_9.npz",
+    "rows": 7500,
+    "pnl": 247.89842616257374
+  },
+  {
+    "seed": 4035,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4035_9.npz",
+    "rows": 7199,
+    "pnl": 207.47101583343465
+  },
+  {
+    "seed": 4037,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4037_9.npz",
+    "rows": 7500,
+    "pnl": 1086.6687538052502
+  },
+  {
+    "seed": 4038,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4038_5.npz",
+    "rows": 5999,
+    "pnl": -34.831370923056966
+  },
+  {
+    "seed": 4100,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4100_5.npz",
+    "rows": 6000,
+    "pnl": 1605.2736473069817
+  },
+  {
+    "seed": 4039,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4039_5.npz",
+    "rows": 6000,
+    "pnl": -180.36631298897555
+  },
+  {
+    "seed": 4039,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4039_9.npz",
+    "rows": 7500,
+    "pnl": 469.93038213980617
+  },
+  {
+    "seed": 4100,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4100_9.npz",
+    "rows": 7500,
+    "pnl": 1082.0515255696082
+  },
+  {
+    "seed": 4038,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4038_9.npz",
+    "rows": 7499,
+    "pnl": 960.7463466792833
+  },
+  {
+    "seed": 4103,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4103_5.npz",
+    "rows": 6000,
+    "pnl": 476.8082560566545
+  },
+  {
+    "seed": 4102,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4102_5.npz",
+    "rows": 6000,
+    "pnl": -545.3628721699934
+  },
+  {
+    "seed": 4101,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4101_5.npz",
+    "rows": 5998,
+    "pnl": -553.8034906246176
+  },
+  {
+    "seed": 4102,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4102_9.npz",
+    "rows": 7500,
+    "pnl": -146.91555136651732
+  },
+  {
+    "seed": 4101,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4101_9.npz",
+    "rows": 7499,
+    "pnl": -287.95842886838363
+  },
+  {
+    "seed": 4103,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4103_9.npz",
+    "rows": 7500,
+    "pnl": -398.45941306703025
+  },
+  {
+    "seed": 4104,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4104_5.npz",
+    "rows": 5999,
+    "pnl": -646.8992503565969
+  },
+  {
+    "seed": 4106,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4106_5.npz",
+    "rows": 6000,
+    "pnl": 1798.192963388312
+  },
+  {
+    "seed": 4105,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4105_5.npz",
+    "rows": 6000,
+    "pnl": 711.2491054106504
+  },
+  {
+    "seed": 4104,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4104_9.npz",
+    "rows": 7499,
+    "pnl": -176.0300013992237
+  },
+  {
+    "seed": 4105,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4105_9.npz",
+    "rows": 7445,
+    "pnl": -149.01480294490466
+  },
+  {
+    "seed": 4106,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4106_9.npz",
+    "rows": 7500,
+    "pnl": 1156.6369123529585
+  },
+  {
+    "seed": 4109,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4109_5.npz",
+    "rows": 6000,
+    "pnl": 971.534122966812
+  },
+  {
+    "seed": 4107,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4107_5.npz",
+    "rows": 5998,
+    "pnl": -344.84123561516753
+  },
+  {
+    "seed": 4108,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4108_5.npz",
+    "rows": 6000,
+    "pnl": 571.327800293162
+  },
+  {
+    "seed": 4108,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4108_9.npz",
+    "rows": 7500,
+    "pnl": -249.08446853843634
+  },
+  {
+    "seed": 4109,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4109_9.npz",
+    "rows": 7500,
+    "pnl": 21.643319106515264
+  },
+  {
+    "seed": 4107,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4107_9.npz",
+    "rows": 7500,
+    "pnl": 176.59663497944712
+  },
+  {
+    "seed": 4112,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4112_5.npz",
+    "rows": 6000,
+    "pnl": 191.08629518913222
+  },
+  {
+    "seed": 4110,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4110_5.npz",
+    "rows": 6000,
+    "pnl": 840.1199329869996
+  },
+  {
+    "seed": 4111,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4111_5.npz",
+    "rows": 6000,
+    "pnl": 1441.0772753681522
+  },
+  {
+    "seed": 4111,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4111_9.npz",
+    "rows": 7500,
+    "pnl": 1067.6118178300385
+  },
+  {
+    "seed": 4112,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4112_9.npz",
+    "rows": 7500,
+    "pnl": 1180.522750123957
+  },
+  {
+    "seed": 4110,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4110_9.npz",
+    "rows": 7499,
+    "pnl": -48.36605091794627
+  },
+  {
+    "seed": 4115,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4115_5.npz",
+    "rows": 6000,
+    "pnl": 938.926792182232
+  },
+  {
+    "seed": 4114,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4114_5.npz",
+    "rows": 6000,
+    "pnl": 1108.8342966621858
+  },
+  {
+    "seed": 4113,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4113_5.npz",
+    "rows": 5999,
+    "pnl": 202.2148445409257
+  },
+  {
+    "seed": 4114,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4114_9.npz",
+    "rows": 7500,
+    "pnl": 295.3910316405236
+  },
+  {
+    "seed": 4115,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4115_9.npz",
+    "rows": 7500,
+    "pnl": -67.30534152101609
+  },
+  {
+    "seed": 4116,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4116_5.npz",
+    "rows": 5999,
+    "pnl": -644.8633194644935
+  },
+  {
+    "seed": 4113,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4113_9.npz",
+    "rows": 7500,
+    "pnl": 958.190635828505
+  },
+  {
+    "seed": 4117,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4117_5.npz",
+    "rows": 6000,
+    "pnl": 854.9685415378772
+  },
+  {
+    "seed": 4118,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4118_5.npz",
+    "rows": 6000,
+    "pnl": 100.61392073595198
+  },
+  {
+    "seed": 4117,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4117_9.npz",
+    "rows": 7500,
+    "pnl": -197.67638117380557
+  },
+  {
+    "seed": 4116,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4116_9.npz",
+    "rows": 7499,
+    "pnl": 23.16550338981324
+  },
+  {
+    "seed": 4118,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4118_9.npz",
+    "rows": 7500,
+    "pnl": 1013.8323494109209
+  },
+  {
+    "seed": 4119,
+    "week": 5,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4119_5.npz",
+    "rows": 5999,
+    "pnl": 1799.5321672318387
+  },
+  {
+    "seed": 4119,
+    "week": 9,
+    "path": "/Users/castorzhao/Desktop/FINM_33500/2026Autumn-6-fresh/round2/results/market_4119_9.npz",
+    "rows": 7499,
+    "pnl": 1042.1127531974926
+  }
+]
