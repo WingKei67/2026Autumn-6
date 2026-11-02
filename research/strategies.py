@@ -7,6 +7,7 @@ fill/snapshot ordering remains an explicit promotion gate.
 """
 from __future__ import annotations
 
+import json
 import math
 import time
 from dataclasses import dataclass
@@ -18,6 +19,11 @@ from team.trader import MyTrader, _Bot
 from team.broker import MyBroker, _RiskBrokerBot
 import team.trader as trader_module
 import team.broker as broker_module
+
+
+# Cash-settled futures (ARENA10): the ledger/risk models are share-only, so research variants never trade them.
+import os
+NON_SHARE_SYMBOLS = frozenset(x.strip() for x in os.environ.get("FUTURES", "ARENA10").split(",") if x.strip())
 
 
 @dataclass(frozen=True)
@@ -33,6 +39,8 @@ class StrategyConfig:
     entry_fraction: float = .5
     take_fraction: float = .9
     ipo: bool = False
+    join: bool = False        # broker: quote at/inside the observed touch instead of ref±spread
+    improve: bool = False     # broker: improve the touch by one tick when spread >= 3 ticks
 
     def __post_init__(self):
         if not 0 < self.exposure <= 2 or self.quote_size < 1 or self.quote_refresh < 1:
@@ -202,6 +210,7 @@ class SeasonTraderBot(_Bot):
         owner = self._owner; cfg = owner.research_config
         if (self.auction or not owner._week5_active or not self._session_open
                 or self._resync or self._first_book or signal.symbol in self._entry_from_board
+                or signal.symbol in NON_SHARE_SYMBOLS
                 or owner._market_halted or signal.symbol in owner._halted_symbols
                 or not self._has_server_snapshot or time.monotonic()-self._snapshot_at > 10
                 or getattr(self.portfolio, "liquidated", False) or owner._inflight):
@@ -260,9 +269,39 @@ class SeasonBroker(MyBroker):
         return -inventory*self.research_config.skew_bps/10000
 
 
+class _Tee:
+    """Observe raw public BookSnapshot frames without altering the production listener."""
+    def __init__(self, ws, touch):
+        self._ws, self._touch = ws, touch
+    def __getattr__(self, name):
+        return getattr(self._ws, name)
+    def __aiter__(self):
+        return self._gen()
+    async def _gen(self):
+        async for raw in self._ws:
+            try:
+                d = json.loads(raw)
+                if d.get("type") == "book_snapshot":
+                    b, a = d.get("bids") or [], d.get("asks") or []
+                    self._touch[d["symbol"]] = (b[0][0] if b else None, a[0][0] if a else None, time.monotonic())
+            except Exception:
+                pass
+            yield raw
+
+
 class SeasonBrokerBot(_RiskBrokerBot):
+    async def listen_to_exchange(self):
+        real = self._ws
+        self._ws = _Tee(real, self._touch)
+        try:
+            await super().listen_to_exchange()
+        finally:
+            if isinstance(self._ws, _Tee):
+                self._ws = real
+
     def __init__(self, owner, exchange_url=None):
         super().__init__(owner, exchange_url)
+        self._touch = {}
         self._post_only_allowed = False
         self._quote_at = {}
 
@@ -295,8 +334,21 @@ class SeasonBrokerBot(_RiskBrokerBot):
         if not ref or ref <= 0:
             return
         spread = self.state.compute_spread(symbol)
-        skew = -ref * self._owner.research_config.skew_bps / 10000 * self.state.positions.get(symbol,0)
-        for side, price in (("buy", round(ref+skew-spread/2,2)), ("sell", round(ref+skew+spread/2,2))):
+        pos = self.state.positions.get(symbol, 0)
+        skew = -ref * self._owner.research_config.skew_bps / 10000 * pos
+        quotes = [("buy", round(ref+skew-spread/2,2)), ("sell", round(ref+skew+spread/2,2))]
+        if cfg.join:
+            bb, ba, seen = self._touch.get(symbol, (None, None, 0))
+            if not bb or not ba or time.monotonic() - seen > 3 or ba - bb < .02 - 1e-9:
+                return
+            tick = .01
+            inc = tick if (cfg.improve and ba - bb >= 3*tick - 1e-9) else 0.
+            # inventory skew moves the quote away from the touch on the side we are loaded on
+            lean = int(round(skew / tick)) if skew else 0
+            buy = min(bb + inc + min(0, lean)*tick, ba - tick)
+            sell = max(ba - inc + max(0, lean)*tick, bb + tick)
+            quotes = [("buy", round(buy, 2)), ("sell", round(sell, 2))]
+        for side, price in quotes:
             await self._send(PlaceOrder(team_id=broker_module.broker_config.TEAM_ID, symbol=symbol,
                                        side=side, order_type="limit", price=price, quantity=cfg.quote_size))
         self._quote_at[symbol] = time.monotonic()
@@ -310,6 +362,8 @@ class SeasonBrokerBot(_RiskBrokerBot):
         if kind == "post_only" and not self._post_only_allowed:
             return
         sym, side = msg.symbol, msg.side
+        if sym in NON_SHARE_SYMBOLS:
+            return
         if not self._ready(sym) or (sym,side) in self._orders:
             return
         marks = self.state.exchange_prices; ref = marks.get(sym,0)
@@ -360,6 +414,9 @@ def make_candidate(name, params=None):
         "aggressive_trader": {"exposure": 2.0},
         "aggressive_broker": {"exposure": 2.0, "passive": True, "quote_size": 10},
         "skew_broker": {"passive": True, "spread_bps": 30, "skew_bps": 1.0},
+        "touch_broker": {"passive": True, "join": True, "quote_size": 5, "quote_refresh": 3.0},
+        "improve_broker": {"passive": True, "join": True, "improve": True, "quote_size": 5, "quote_refresh": 3.0},
+        "touch_skew_broker": {"passive": True, "join": True, "quote_size": 5, "quote_refresh": 3.0, "skew_bps": 2.0},
         "imbalance_trader": {"signal": "imbalance"},
         "reversion_trader": {"signal": "reversion"},
         "combined_trader": {"signal": "combined"},

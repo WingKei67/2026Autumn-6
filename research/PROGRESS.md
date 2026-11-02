@@ -59,6 +59,20 @@ Interpretation (honest):
 - Broker: no variant shows a credible edge; maker rebates are tiny ($20-117/run) and offset by adverse selection. `aggressive_broker` fails accounting in 16/30 runs — disqualified until root-caused.
 - DQ rows flagged `DISQUALIFIED accounting/liquidation` in registry (trader: short 4, aggressive 2) need root-cause too; they are NOT excluded from the table above.
 
+## P0 root-causes (milestone 2)
+- **ORDER_NOT_FOUND**: NOT a defect. Trader: deliberate IOC terminal-confirmation handshake (`team/trader.py` ~570-612): after each OrderAck it cancels the IOC and treats ORDER_NOT_FOUND as proof the IOC finished. One per order. Broker: cancel-twice protocol (`cancel_quotes`). Costs 2 messages/order; matters for Week 7+ message quotas.
+- **Trader accounting failures (weeks 9/10 only)**: REAL defect in the control. Econ-print plan covers ALL symbols incl. ARENA10, a cash-settled future; the share-only ledger/risk then diverges from exchange cash by ~$7-8k. Fix kept OUT of `team/*` (test_alpha pins live source hashes; control preserved): research variants refuse `NON_SHARE_SYMBOLS` in `research/strategies.py`. Deployed MyTrader would hit this if ever activated in wk9/10 -> must carry the guard before any deployment.
+- **Broker 'positions mismatch'**: harness artifact ({sym:0} vs missing key). Fixed.
+- **Futures identity**: harness assertion mirrors `Portfolio.net_worth` (server.py:284-307), which is exactly what `snapshot_equity` scores (server.py:3719, ref_prices). Verified against official source.
+- **Baseline broker == cash**: `_graded_week5 = (week == 5)` in `team/broker.py` (lines 111,117) makes `_ready()` false in weeks 6-10. Deployed broker never quotes after week 5. Regression test added (characterization).
+- **Baseline trader**: same gating via `_week5_active`; 0 orders in wk 6-10 (the +0.317 raw score is endowment drift).
+- **imbalance/reversion never fire**: by construction. imbalance edge <= mid/ask-1+0.003 < 2*taker+0.002 threshold (unreachable); reversion needs a 1.2% dislocation. They are null because of rule design, not evidence. Replaced by a direct predictiveness study (`research/signal_study.py`, 12 seeds, observation only):
+  - OBI and microprice: corr with 5/20-tick forward mid return ~0 (|corr|<0.011, se ~0.007-0.018) -> REJECTED (Family C).
+  - Short-term momentum exists (|5-tick return| in 20-40bp -> +17bp fwd; 40-100bp -> +39bp; >100bp -> +67bp signed fwd 5 ticks) but this is the scripted event ramp; round-trip cost is ~30bp taker fees + ~19bp spread => only the >100bp bucket nets positive and it is rare (~20 obs/run). Event strategy already captures it via announcements.
+- **Harness validity bug (big)**: bots close the socket on any uncorrelated exchange error (e.g. POST_ONLY_CROSS) and the harness never reconnected, so passive-broker results were truncated (transport_closed in 18/35 passive, 35/35 skew runs). Harness now emulates the production reconnect: venue sweeps resting orders, 3s wait, re-handshake replay (books, leaderboard, fees, SESSION_OPEN late_join, MARKET_STATE). All earlier passive-broker numbers (E1) are INVALID.
+- Earlier harness runs mixed code versions inside one batch when the harness file was edited mid-batch: do not edit research/ during a batch (source_hash is taken at batch start only).
+- New broker variants: touch_broker / improve_broker / touch_skew_broker (post-only at/inside observed touch from public book snapshots via a read-only Tee on the wire).
+
 ## Next steps
 1. (done: E1 above)
 2. Root-cause ORDER_NOT_FOUND; check broker `DISQUALIFIED accounting` rows seen in Codex's train runs.

@@ -20,7 +20,9 @@ def load(stage, sha=None):
     for r in last.values():
         if r['stage'] != stage or r['status'] != 'completed': continue
         if sha and r['source_hash'] != sha: continue
-        out[r['name']][int(r['seed'])] = dict(score=float(r['score']), pnl=float(r['pnl']),
+        import json as _j; prm = _j.loads(r['config']).get('params') or {}
+        key = r['name'] + (str(sorted(prm.items())) if prm else '')
+        out[key][int(r['seed'])] = dict(score=float(r['score']), pnl=float(r['pnl']),
                                               fees=float(r['fees'] or 0), rebates=float(r['rebates'] or 0),
                                               liq=r['liquidated'] == 'True', week=int(r['week']),
                                               dq=r['reason'].startswith('DISQ'))
@@ -46,13 +48,13 @@ def main():
     base = data[control]
     print(f"{'name':20s}{'n':>4}{'dScore':>9}{'95% CI':>20}{'P(>0)':>7}{'dPnL':>8}{'worstD':>8}{'liq':>4}{'dq':>3}{'fees':>7}{'reb':>7}")
     for name, d in sorted(data.items()):
-        if not name.endswith(a.role): continue
+        if not name.split('[')[0].endswith(a.role): continue
         seeds = [s for s in d if s in base]
         if len(seeds) < 2: continue
         ds = [d[s]['score'] - base[s]['score'] for s in seeds]
         dp = [d[s]['pnl'] - base[s]['pnl'] for s in seeds]
         lo, hi = boot(ds)
-        print(f"{name:20s}{len(seeds):4d}{st.mean(ds):+9.3f}  [{lo:+.3f},{hi:+.3f}]{sum(x > 0 for x in ds)/len(ds):7.2f}"
+        print(f"{name[:44]:46s}{len(seeds):4d}{st.mean(ds):+9.3f}  [{lo:+.3f},{hi:+.3f}]{sum(x > 0 for x in ds)/len(ds):7.2f}"
               f"{st.mean(dp):+8.0f}{min(ds):+8.2f}{sum(d[s]['liq'] for s in seeds):4d}{sum(d[s]['dq'] for s in seeds):3d}"
               f"{st.mean(d[s]['fees'] for s in seeds):7.1f}{st.mean(d[s]['rebates'] for s in seeds):7.1f}")
 

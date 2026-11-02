@@ -20,6 +20,7 @@ def digest():
     for folder in ['research','team','engine','season','arena','week2']:
         for p in sorted((ROOT/folder).rglob('*')):
             if p.suffix not in {'.py','.json'} or 'results' in p.parts: continue
+            if folder == 'research' and p.name not in {'harness.py', 'strategies.py'}: continue  # analysis/test files do not affect results
             h.update(str(p.relative_to(ROOT)).encode()); h.update(p.read_bytes())
     return h.hexdigest()
 

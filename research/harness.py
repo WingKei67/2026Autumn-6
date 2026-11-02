@@ -94,7 +94,7 @@ class ResearchArena(HeadlessArena):
 
 
 async def run_one(name='baseline_trader', seed=1, week=6, ticks=1200,
-                  population='mixed', stress='base', params=None):
+                  population='mixed', stress='base', params=None, probe=None):
     from research.strategies import make_candidate
     params = params or {}
     logging.disable(logging.CRITICAL)
@@ -171,7 +171,7 @@ async def run_one(name='baseline_trader', seed=1, week=6, ticks=1200,
             await s._send(endpoint, s._build_leaderboard()); await drain()
             initial_cash = p.cash
             await s.open_session()
-            curves = []; max_gross = 0.; quote_index = 0
+            curves = []; max_gross = 0.; quote_index = 0; reconnect_at = None; reconnects = 0
             for step in range(ticks):
                 clock[0] = 1700000000. + step
                 await s.advance_tick(); await s.resume_due()
@@ -181,6 +181,7 @@ async def run_one(name='baseline_trader', seed=1, week=6, ticks=1200,
                 for opponent in a.bots[1:]:
                     await opponent.act(a)
                     await a.flush_cancels()
+                if probe: probe(s, step)
                 await public_data()
                 # Polling clock (10 Hz trader / 2 Hz broker) is separate from 1 Hz venue.
                 for sub in range(10):
@@ -189,7 +190,31 @@ async def run_one(name='baseline_trader', seed=1, week=6, ticks=1200,
                         for sym, book in s.books.items():
                             await s._send(endpoint, s._make_snapshot(sym, book))
                     await drain()
-                    if wire.closed: break  # fail closed; reconnect is exercised in WS rehearsal
+                    if wire.closed:
+                        # Emulate the production reconnect loop: the venue sweeps the seat's resting
+                        # orders at disconnect, the bot waits RETRY seconds, then re-handshakes and is
+                        # replayed books/leaderboard/fees/SESSION_OPEN(late_join)/MARKET_STATE.
+                        if reconnect_at is None:
+                            await s._cancel_resting_orders(target, 'disconnect')
+                            reconnect_at = clock[0] + 3.0; reconnects += 1
+                        if clock[0] < reconnect_at: continue
+                        reconnect_at = None; wire.closed = False
+                        wire.incoming.clear(); wire.outgoing.clear()
+                        if role == 'broker':
+                            bot._has_snapshot = False; bot._continuous = False; bot._resume_probes.clear()
+                            bot._board_tick = -1; bot._orders.clear()
+                            bot.state.resting_orders.clear(); bot.state.last_quote_prices.clear()
+                        for sym, book in s.books.items():
+                            await s._send(endpoint, s._make_snapshot(sym, book))
+                        await s._send(endpoint, s._build_leaderboard())
+                        await s._send(endpoint, s._fee_schedule_event(cfg.refresh_venue_fees()))
+                        await s._send(endpoint, SessionEvent(event='SESSION_OPEN', message='rejoin',
+                            data={'symbols': list(s.books.keys()), 'tick': s.tick, 'week': s.scenario.week,
+                                  'scenario': s.scenario.to_dict(), 'late_join': True}))
+                        await s._send(endpoint, SessionEvent(event='MARKET_STATE', message='Current trading gates',
+                            data={'halted_symbols': sorted(s.circuit_breaker.halted),
+                                  'market_halted': s.circuit_breaker.market_halted, 'week': s.scenario.week}))
+                        await drain()
                     if role == 'trader' and bot._session_open:
                         signal = bot.strategy.generate_signal(bot.market, bot.portfolio)
                         if signal:
@@ -231,8 +256,10 @@ async def run_one(name='baseline_trader', seed=1, week=6, ticks=1200,
             accounting = []
             if role == 'trader': accounting = bot.ledger.reconcile(**bot._row_state(row))
             else:
-                if bot.state.positions != p.positions: accounting.append('broker positions mismatch')
-                if abs(bot.state.cash-p.cash)>0.02: accounting.append('broker cash mismatch')
+                bp = {k: v for k, v in bot.state.positions.items() if v}; ep = {k: v for k, v in p.positions.items() if v}
+                if bp != ep: accounting.append(f'broker positions mismatch bot={bp} exch={ep}')
+                if abs(bot.state.cash-p.cash)>max(0.02, 0.005*len(ownfills)):  # per-fill cent rounding of fees/rebates
+                    accounting.append(f'broker cash mismatch bot={bot.state.cash:.2f} exch={p.cash:.2f}')
             result = dict(name=name, seed=seed, week=week, ticks=ticks, population=population, stress=stress,
                 params=params, role=role, **metrics, terminal_equity=final_eq,
                 pnl=final_eq-hist[0][1], cash_start=initial_cash, fees=fees, rebates=rebates,
@@ -242,7 +269,7 @@ async def run_one(name='baseline_trader', seed=1, week=6, ticks=1200,
                 fill_ratio=sum(f['quantity'] for f in ownfills)/max(1,wire.quantity),
                 turnover=sum(f['price']*f['quantity'] for f in ownfills),
                 max_gross=max_gross, utilization=max_gross/cash, liquidated=p.liquidated,
-                errors=dict(wire.errors), transport_closed=wire.closed, accounting_errors=accounting,
+                errors=dict(wire.errors), transport_closed=wire.closed, reconnects=reconnects, accounting_errors=accounting, cash_divergence=(bot.state.cash-p.cash) if role=='broker' else None,
                 equity_history=hist, curve=curves, fills_detail=ownfills, orders_detail=requested,
                 opponents=[dict(name=b.preset, role=b.role, **score_equity([v for _,v in s.equity_history.get(b.team_id,[])])) for b in a.bots[1:]],
                 runtime=dict(taker=cfg.TAKER_FEE_RATE, rebate=cfg.MAKER_REBATE_RATE,
