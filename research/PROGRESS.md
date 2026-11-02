@@ -120,7 +120,11 @@ Per-run score is per single week (25 snapshots); a season score pools weeks, so 
 Open item (NOT root-caused): the 3 latency-stress runs flagged `cash: ours vs exchange` differ by $50-380 (0.03-0.2%) at end of run with a SYMBOL_HALTED reject; probably in-flight fills at end under +1s latency, but unproven. Zero liquidations anywhere.
 ### SEALED RUN started (once): seeds 1001-1100, frozen candidates only (cash, baseline, season, event2, event2_long). No changes after this.
 
-## Next steps
+### E6 — SEALED (1001-1100, run once, 100/100 completed, 0 liq/0 accounting errors): event2 +0.157 vs cash; +0.044 [+0.022,+0.068] vs corrected baseline (P(>0)=0.74, +$947); +0.136 vs deployed. By week edge vs season: wk6 +.026, wk7 +.064, wk8 +.003, wk9 -.002, wk10 +.128. SEALED SEEDS NOW CONSUMED for these candidates; any new candidate needs new sealed seeds (e.g. 2001-2100).
+Trader 1 deliverables written: research/TRADER1_{BASELINE,STRATEGIES,OPTIMIZATION,ROBUSTNESS,FINAL}.md + TRADER1_EXPERIMENTS.csv.
+
+## Next steps (updated after E6)
+0. Open Trader 1: overshoot-fade, IPO validation, thin-liquidity weakness, weeks 8-9 (no edge), latency cash discrepancy, run rehearsal.py, port futures guard to production with documented hash-pin update (needs authorization). Broker work paused.
 1. (done: E1 above)
 2. Root-cause ORDER_NOT_FOUND; check broker `DISQUALIFIED accounting` rows seen in Codex's train runs.
 3. Broker: confirm passive post-only quoting actually rests and fills (maker ratio, rebates) vs IOC baseline.
