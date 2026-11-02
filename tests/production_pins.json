@@ -1,0 +1,24 @@
+{
+ "team/trader.py": {
+  "history": [
+   {
+    "sha256": "15b65c0b56e7eefb6b4efbd9cd95eb909992b19b96c086261c4a48b0a6fb2297",
+    "date": "2026-11-02",
+    "base_commit": "e4d8c54",
+    "reason": "Trader 1 integration: week-aware activation (weeks 5-10), ARENA10 futures guard (plan/react/outbound), short-gate+SSR state, selectable Event2 strategy (TRADER_STRATEGY, default baseline), TRADER_CASH_RESERVE constant; new team/event2.py",
+    "approval": "User approved Trader 1 production-code changes in the isolated research branch (2026-11-02); no deployment."
+   }
+  ]
+ },
+ "team/event2.py": {
+  "history": [
+   {
+    "sha256": "70336c502d482c772caeeaab82cb0c6b12d928992cacc8372be9e4753af0bc68",
+    "date": "2026-11-02",
+    "base_commit": "e4d8c54",
+    "reason": "Trader 1 integration: week-aware activation (weeks 5-10), ARENA10 futures guard (plan/react/outbound), short-gate+SSR state, selectable Event2 strategy (TRADER_STRATEGY, default baseline), TRADER_CASH_RESERVE constant; new team/event2.py",
+    "approval": "User approved Trader 1 production-code changes in the isolated research branch (2026-11-02); no deployment."
+   }
+  ]
+ }
+}

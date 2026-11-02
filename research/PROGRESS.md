@@ -123,6 +123,28 @@ Open item (NOT root-caused): the 3 latency-stress runs flagged `cash: ours vs ex
 ### E6 — SEALED (1001-1100, run once, 100/100 completed, 0 liq/0 accounting errors): event2 +0.157 vs cash; +0.044 [+0.022,+0.068] vs corrected baseline (P(>0)=0.74, +$947); +0.136 vs deployed. By week edge vs season: wk6 +.026, wk7 +.064, wk8 +.003, wk9 -.002, wk10 +.128. SEALED SEEDS NOW CONSUMED for these candidates; any new candidate needs new sealed seeds (e.g. 2001-2100).
 Trader 1 deliverables written: research/TRADER1_{BASELINE,STRATEGIES,OPTIMIZATION,ROBUSTNESS,FINAL}.md + TRADER1_EXPERIMENTS.csv.
 
+## INTEGRATION PHASE (user-approved 2026-11-02; research branch only, nothing deployed)
+Production files changed (uncommitted at this line): `team/trader.py` (GRADED_WEEKS week-aware activation, `_set_week`/`on_session_open`, short-gate+SSR state, futures strip at CALENDAR_EVENT/SHOCK + outbound NON_SHARE_SYMBOLS guard, optional Event2 branch + short/cover handling in `_place_order`, TRADER_STRATEGY selector default 'baseline'), NEW `team/event2.py` (shared engine; research EventTrader now wraps the same engine). `team/broker.py` untouched. Control kept verbatim: `research/legacy_trader_e4d8c54.py` (= `deployed_trader`).
+Refactor check: research event2_trader on the shared engine reproduces stored sealed orders+PnL exactly (seeds 1001-1006,1010; weeks 6-10). Tests: tests/test_trader1_integration.py (16).
+New seed pools: dev2 3001-3060 (integration/tuning), final 4001-4100 (untouched; run once after freeze). Sealed 1001-1100 consumed.
+### E7 — dev2 (60 paired seeds), REAL 150-share seat cap + 70k gross cap, 0 liq / 0 accounting errors
+| variant | dScore vs cash | dPnL | vs prod_baseline |
+|---|---|---|---|
+| deployed_trader (original) | +0.021 [+0.007,+0.037] | +217 | -0.111 |
+| prod_baseline_trader (corrected: weeks 5-10 + futures guard, keeps IPO) | +0.132 [+0.102,+0.163] | +1527 | 0 |
+| prod_event2_trader | +0.148 [+0.118,+0.179] | +1466 | **+0.016 [-0.007,+0.043], dPnL -61 (median -8)** |
+| research event2_trader @150/70k/chunk60 (no IPO) | +0.140 | +1331 | +0.008 |
+FINDING: under deployable caps Event2's edge over the corrected baseline VANISHES (not significant). The sealed +0.044 relied on cap_shares=400/gross 140k. Corrected baseline already harvests negative events via sell-then-restore of endowed inventory (FIFO 'sell-first' +719/run vs event2 +767), so extra shorting adds little at 150 shares. prod_baseline > earlier season_trader mainly because it keeps IPO participation (~+0.035; research season_trader had IPO off).
+Research-vs-production difference: research event2 lacks IPO and uses SeasonTraderBot._place_order; production uses _Bot._place_order (pending-buy reservation, price band).
+
+### E8 — capital decomposition (dev2, 60 paired): relaxing caps alone helps the baseline little (+0.015 dScore/+$643 at gross105k/reserve.35); Event2 at SAME relaxed caps adds +0.048 (V1) / +0.084, +$701 (V3: notional .3, 6 syms) over the equal-capital baseline; V3 vs deployed-cap baseline +0.099, +$1343, p10 +$159. Risk (dev2): mdd max 1.2%, peak gross $109k, 0 liq, 0 accounting errors, only wire errors = intended IOC handshake. V3 chosen on dev2 only (4 mini-sweep configs) -> FROZEN as Event2Config defaults.
+### E9 — evidence closing the open items
+- Latency $50-380 cash discrepancy: ROOT-CAUSED as a HARNESS artifact (trader reconnect emulation dropped in-flight fills without the production resync; trigger = SYMBOL_HALTED reject -> fail-closed reconnect). With production-faithful reconnect (fresh book, on_reconnect, _resync, terminal table cleared) all 3 flagged runs reconcile exactly. Earlier latency-stress P&L figures (E5) are superseded; rerun below.
+- Real local WebSocket rehearsal (research/rehearsal.py, fixed 3 bugs; all-symbol counterparty): weeks 6-10 with forced reconnect for prod_event2_trader and (w6,7,9) prod_baseline_trader: 0 accounting errors, 0 liquidations, 0 resting orders after close, reconnect restored snapshot each time. Rejects: single SYMBOL_HALTED in weeks 9/10 (IOC racing a velocity halt; baseline does the same) -> fail-closed reconnect worked.
+- Team-headroom stress (position limit 60 < seat cap 150, emulating other seats' holdings): both bots get POSITION_LIMIT rejects, reconnect, exact accounting, no liquidation. LIMITATION: bots know only the seat cap, not team headroom; deployment must set SEAT_POSITION_CAP consistent with other seats.
+- Pins: tests/production_pins.json records approved hashes for team/trader.py and new team/event2.py (reason+approval); test_alpha now also proves research/legacy_trader_e4d8c54.py == original pinned hash. team/broker.py unchanged and still pinned.
+### FREEZE (before final): production candidate = MyTrader(strategy='event2') with Event2Config defaults (cap 150, gross 105000, reserve 0.35, notional 0.30, maxsyms 6, others as before). Fallback = MyTrader() baseline (default). Controls: deployed_trader (verbatim original), cash_trader, prod_baseline_trader (deployed caps), prod_baseline_trader@105k/0.35 (equal capital). FINAL SEEDS 4001-4100 run once; no changes after.
+
 ## Next steps (updated after E6)
 0. Open Trader 1: overshoot-fade, IPO validation, thin-liquidity weakness, weeks 8-9 (no edge), latency cash discrepancy, run rehearsal.py, port futures guard to production with documented hash-pin update (needs authorization). Broker work paused.
 1. (done: E1 above)

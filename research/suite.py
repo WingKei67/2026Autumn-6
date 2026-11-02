@@ -10,7 +10,9 @@ REGISTRY = ROOT/'research/EXPERIMENT_REGISTRY.csv'
 SPLITS = {'train': list(range(1,7)), 'validation': list(range(101,161)),
           'sealed': list(range(1001,1101)),
           # Added after seeing train-only results: larger tuning pool; never overlaps other splits.
-          'dev': list(range(11,71))}
+          'dev': list(range(11,71)),
+          # Added 2026-11-02 for the integration phase; sealed 1001-1100 is CONSUMED. 'final' untouched until freeze.
+          'dev2': list(range(3001,3061)), 'final': list(range(4001,4101))}
 FIELDS = ['id','stage','name','hypothesis','source_commit','source_hash','config','seed','week',
           'population','stress','ticks','status','started','completed','score','pnl','fees',
           'rebates','liquidated','artifact','reason']

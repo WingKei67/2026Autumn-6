@@ -167,13 +167,23 @@ def test_seed_reproducibility_and_global_config_restoration():
 
 
 def test_live_source_hashes_are_unchanged():
+    """Broker is pinned to the original protocol hash. team/trader.py (and new team/event2.py) were INTENTIONALLY
+    changed (week-aware activation, futures guard, Event2); their approved hashes live in tests/production_pins.json
+    with the reason and approval. The original trader is preserved verbatim in research/legacy_trader_e4d8c54.py and
+    must still hash to the original pinned value."""
     import hashlib,json
     root=Path(__file__).resolve().parents[1]
     protocol=root/'alpha_results/study/protocol.json'
     if not protocol.exists():pytest.skip('No experiment protocol yet')
     d=json.loads(protocol.read_text())
-    for name in ('trader','broker'):
-        assert hashlib.sha256((root/f'team/{name}.py').read_bytes()).hexdigest()==d[f'live_{name}_sha256']
+    assert hashlib.sha256((root/'team/broker.py').read_bytes()).hexdigest()==d['live_broker_sha256']
+    pins=json.loads((root/'tests/production_pins.json').read_text())
+    for f in ('team/trader.py','team/event2.py'):
+        latest=pins[f]['history'][-1]
+        assert latest['reason'] and latest['approval']
+        assert hashlib.sha256((root/f).read_bytes()).hexdigest()==latest['sha256'], f'{f} changed since last approved pin'
+    legacy=(root/'research/legacy_trader_e4d8c54.py').read_text().split('\n',1)[1].encode()
+    assert hashlib.sha256(legacy).hexdigest()==d['live_trader_sha256'], 'original-trader control is no longer verbatim'
 
 
 def test_partial_stock_leg_scales_delayed_futures_hedge():

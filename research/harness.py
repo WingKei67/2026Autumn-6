@@ -105,6 +105,9 @@ async def run_one(name='baseline_trader', seed=1, week=6, ticks=1200,
     defaults.FUNDAMENTAL_SEED = f'research:{seed}'
     defaults.FUNDAMENTAL_VOL = (0.5, 1., 2., 4.)[seed % 4] * (2 if stress == 'volatile' else 1)
     scenario = load_week(week)
+    if stress == 'poslimit':
+        # Other team seats already hold part of the team-wide per-symbol limit: headroom (60) far below the 150-share seat cap.
+        scenario.position_limit = 60
     role = 'broker' if 'broker' in name else 'trader'
     target = 'research_' + role
     tc.TEAM_ID = bc.TEAM_ID = target
@@ -136,6 +139,9 @@ async def run_one(name='baseline_trader', seed=1, week=6, ticks=1200,
             p = s.portfolios[target]; p.role = role
             wire = Wire(clock, delay); endpoint = VenueSocket(wire)
             s.clients[target] = endpoint
+            if name == 'deployed_trader':
+                import research.legacy_trader_e4d8c54 as _legacy
+                _legacy.STATE_DIR = Path(tmp)
             owner, bot = make_candidate(name, params)
             bot._ws = wire
             if role == 'trader':
@@ -200,6 +206,12 @@ async def run_one(name='baseline_trader', seed=1, week=6, ticks=1200,
                         if clock[0] < reconnect_at: continue
                         reconnect_at = None; wire.closed = False
                         wire.incoming.clear(); wire.outgoing.clear()
+                        if role == 'trader':
+                            # mirror team.trader._Bot.run() reconnect: stale book dropped, authoritative resync required
+                            bot._connects += 1; bot._session_open = False
+                            bot.market = trader._RefMarket(owner._refs); owner.on_reconnect()
+                            bot._resync = bot._first_book = True; bot._has_server_snapshot = False
+                            bot._terminal_orders.clear(); bot._board_tick = -1
                         if role == 'broker':
                             bot._has_snapshot = False; bot._continuous = False; bot._resume_probes.clear()
                             bot._board_tick = -1; bot._orders.clear()

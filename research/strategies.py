@@ -209,155 +209,52 @@ class SeasonTrader(MyTrader):
         return None
 
 
-class EvPlan:
-    __slots__ = ("sym", "sign", "pre", "pct", "ov", "t0", "ramp_s", "pos0", "target", "state", "entry_px", "n_ent", "attempts")
-    def __init__(self, sym, sign, pre, pct, ov, t0, ramp_s, pos0):
-        self.sym, self.sign, self.pre, self.pct, self.ov, self.t0, self.ramp_s, self.pos0 = sym, sign, pre, pct, ov, t0, ramp_s, pos0
-        self.target = 0; self.state = "enter"; self.entry_px = 0.; self.n_ent = 0; self.attempts = 0
-
-
 class EventTrader(SeasonTrader):
-    """Public-direction event trader: enter on the fired event's signed move, long or short,
-    sized from a notional budget and book depth, exit at a fraction of the overshoot / time / stop."""
+    """Research wrapper around the SHARED engine in team/event2.py (same logic the production
+    MyTrader(strategy='event2') runs). Differs from production only in the research _place_order
+    (SeasonTraderBot) and configurable caps."""
 
     def __init__(self, config=None):
         super().__init__(config)
-        self.ev = {}
-        self._ev_peak = 0.
-        self.ev_stats = {"events": 0, "entries": 0, "skipped_edge": 0}
+        c = self.research_config
+        from team.event2 import Event2Config, Event2Engine
+        self.event2 = Event2Engine(self, Event2Config(
+            cap_shares=c.cap_shares, gross_cap=c.gross_cap, exposure=c.exposure, enable_short=c.enable_short,
+            ev_notional=c.ev_notional, ev_entry=c.ev_entry, ev_take=c.ev_take, ev_time=c.ev_time, ev_stop=c.ev_stop,
+            ev_window=c.ev_window, ev_chunk=c.ev_chunk, ev_kill=c.ev_kill, ev_min_edge=c.ev_min_edge,
+            ev_delay=c.ev_delay, ev_maxsyms=c.ev_maxsyms))
+        self._market = None
 
-    # -- events ----------------------------------------------------------
     def on_event(self, event, message, data):
         super().on_event(event, message, data)
-        self.plans.clear()                      # parent plans are not used by this strategy
+        self.plans.clear()
         if event == "CALENDAR_EVENT":
-            self._ev_event(data)
+            self.event2.on_calendar(data, self._portfolio, self._market)
+        elif event == "SHOCK":
+            self.event2.on_shock(data, self._portfolio, self._market)
         if event in {"WEEK_CHANGED", "SESSION_OPEN"} and not data.get("late_join", False):
-            self.ev.clear()
+            self.event2.reset()
 
     def _on_shock(self, data):
-        targets = data.get("prices") or {}
-        for sym in data.get("affected") or []:
-            pre = self._refs.get(sym) or self._mids.get(sym); target = targets.get(sym)
-            if pre and target:
-                self._ev_event({"pct": float(target) / pre - 1.0, "affected": [sym],
-                                "ramp_ticks": self.ramp_ticks, "overshoot": self.overshoot})
+        self.event2.on_shock(data, self._portfolio, self._market)
 
-    def _ev_event(self, data):
-        cfg = self.research_config
-        pct = float(data.get("pct") or 0.0)
-        if not pct or abs(pct) > .25:
-            return
-        ramp_s = max(1, int(data.get("ramp_ticks") or 15)) * 1.0
-        ov = float(data.get("overshoot") or 1.0)
-        syms = [x for x in (data.get("affected") or []) if x not in NON_SHARE_SYMBOLS and self._mids.get(x)]
-        if not syms:
-            return
-        self.ev_stats["events"] += 1
-        cost = 2 * max(self.taker, .0015) * cfg.ev_min_edge
-        edge = (cfg.ev_take * ov - cfg.ev_entry) * abs(pct)
-        if edge <= cost:
-            self.ev_stats["skipped_edge"] += 1
-            return
-        if len(syms) > cfg.ev_maxsyms:     # market-wide: favour the cheapest spread (relative)
-            syms.sort(key=lambda x: self._rel_spread.get(x, 1.))
-            syms = syms[:cfg.ev_maxsyms]
-        port = getattr(self, "_portfolio", None)
-        nw = port.net_worth(self._market) if (port is not None and getattr(self, "_market", None) is not None) else 175000.
-        budget = cfg.ev_notional * nw * cfg.exposure / max(1, len(syms)) * (len(syms) if len(syms) == 1 else 1)
-        for sym in syms:
-            pre = self._mids[sym]
-            pos0 = int(port.positions.get(sym, 0)) if port is not None else 0
-            plan = EvPlan(sym, 1 if pct > 0 else -1, pre, pct, ov, self.now(), ramp_s, pos0)
-            plan.target = int(budget / pre)
-            self.ev[sym] = plan
-
-    _rel_spread = {}
-
-    # -- decisions ---------------------------------------------------------
     def on_tick(self, market, portfolio):
-        self._market, self._portfolio_ref = market, portfolio
+        self._market = market
         bot = getattr(self, "_bot", None)
         if bot is not None and (bot._resync or bot._first_book):
             return None
         if self._market_halted:
             return None
-        for sym in market.symbols():
-            bid, ask = market.best_bid(sym), market.best_ask(sym)
-            if bid and ask:
-                self._mids[sym] = (bid + ask) / 2
-                self._rel_spread[sym] = (ask - bid) / ((ask + bid) / 2)
-        sig = self._resumption_order(market, portfolio) or self._ev_signal(market, portfolio) or self._react(market, portfolio)
+        self.event2.note_quotes(market)
+        sig = (self._resumption_order(market, portfolio) or self.event2.signal(market, portfolio)
+               or self._react(market, portfolio))
         if sig is None or sig.symbol in self._inflight or sig.symbol in self._halted_symbols:
             return None
         return sig
 
-    def _ev_signal(self, market, portfolio):
-        cfg = self.research_config
-        nw = portfolio.net_worth(market)
-        self._ev_peak = max(self._ev_peak, nw)
-        halted = nw < self._ev_peak * (1 - cfg.ev_kill)
-        best = None
-        for sym, p in list(self.ev.items()):
-            sig, urg = self._ev_step(p, market, portfolio, halted)
-            if p.state == "done":
-                self.ev.pop(sym, None)
-            if sig is not None and (best is None or urg > best[0]):
-                best = (urg, sig)
-        return best[1] if best else None
-
-    def _ev_step(self, p, market, portfolio, halted):
-        cfg = self.research_config; sym = p.sym
-        if sym in self._halted_symbols or (getattr(self, "_bot", None) is not None and sym in self._bot._entry_from_board):
-            return None, 0
-        bid, ask = market.best_bid(sym), market.best_ask(sym)
-        mid = (bid + ask) / 2 if (bid and ask) else self._mids.get(sym)
-        if not mid:
-            return None, 0
-        age = self.now() - p.t0
-        pos = int(portfolio.positions.get(sym, 0))
-        held = p.sign * (pos - p.pos0)          # shares of the event position currently held (signed by direction)
-        sign = p.sign
-        if p.state == "enter":
-            if age < cfg.ev_delay:
-                return None, 0
-            if sign < 0 and not (cfg.enable_short and self._shorts_allowed and sym not in self._ssr):
-                p.state = "done"; return None, 0
-            limit = p.pre * (1 + sign * cfg.ev_entry * abs(p.pct))
-            want = p.target - max(held, 0)
-            if halted or want <= 0 or age > p.ramp_s * cfg.ev_window:
-                p.state = "hold" if held > 0 else "done"; return None, 0
-            if sign > 0:
-                if not ask or ask > limit: return None, 0
-                qty = min(want, cfg.ev_chunk, _depth(market, sym, "asks", limit))
-                if qty <= 0 or not portfolio.can_buy(sym, qty, limit): return None, 0
-                return Signal(symbol=sym, side="buy", quantity=qty, price=round(limit, 2)), 3.0
-            if not bid or bid < limit: return None, 0
-            qty = min(want, cfg.ev_chunk, _depth(market, sym, "bids", limit))
-            if qty <= 0: return None, 0
-            return Signal(symbol=sym, side="sell", quantity=qty, price=round(limit, 2)), 3.0
-        if p.state == "hold":
-            if held <= 0:
-                p.state = "done"; return None, 0
-            if not p.entry_px:
-                p.entry_px = mid
-            take = p.pre * (1 + sign * cfg.ev_take * p.ov * abs(p.pct))
-            stop = p.entry_px * (1 - sign * cfg.ev_stop * abs(p.pct))
-            hit = (mid >= take or mid <= stop) if sign > 0 else (mid <= take or mid >= stop)
-            if hit or age > p.ramp_s * cfg.ev_time:
-                qty = min(held, cfg.ev_chunk * 2)
-                if sign > 0 and bid:
-                    return Signal(symbol=sym, side="sell", quantity=qty, price=round(bid * .995, 2)), 5.0
-                if sign < 0 and ask:
-                    return Signal(symbol=sym, side="buy", quantity=qty, price=round(ask * 1.005, 2)), 5.0
-        return None, 0
-
     def on_fill(self, side, symbol, quantity, price):
-        p = self.ev.get(symbol)
-        if p is not None and not p.entry_px and ((side == "buy") == (p.sign > 0)):
-            p.entry_px = price
+        self.event2.on_fill(side, symbol, quantity, price)
         super().on_fill(side, symbol, quantity, price)
-
 
 
 class SeasonTraderBot(_Bot):
@@ -560,6 +457,21 @@ class SeasonBrokerBot(_RiskBrokerBot):
 def make_candidate(name, params=None):
     """Return owner and real adapter; caller must isolate state before construction."""
     params = dict(params or {})
+    if name == "deployed_trader":
+        import research.legacy_trader_e4d8c54 as legacy
+        owner = legacy.MyTrader()
+        return owner, legacy._Bot(owner)
+    if name in {"prod_baseline_trader", "prod_event2_trader"}:
+        # The ACTUAL production classes (team/trader.py) with week-aware activation + futures guard.
+        from team.event2 import Event2Config
+        cfg = Event2Config(**params) if (params and name == "prod_event2_trader") else None
+        if name == "prod_baseline_trader" and params:
+            # Same capital-limit relaxation as Event2 variants, applied to the unchanged baseline strategy
+            # (process-isolated module constants; used to separate "more capital" from "better strategy").
+            trader_module.TRADER_GROSS_CAP = float(params.get("gross_cap", trader_module.TRADER_GROSS_CAP))
+            trader_module.TRADER_CASH_RESERVE = float(params.get("cash_reserve", trader_module.TRADER_CASH_RESERVE))
+        owner = MyTrader(strategy="event2" if name == "prod_event2_trader" else "baseline", event2_config=cfg)
+        return owner, _Bot(owner)
     if name in {"baseline_trader", "cash_trader"}:
         owner = MyTrader()
         if name == "cash_trader":

@@ -83,19 +83,22 @@ async def run(args, runtime):
                 await asyncio.sleep(.01)
             assert ready, 'initial account snapshot missing'
             await venue.open_session()
-            preopen_orders=sum(len(b.orders) for b in venue.books.values())
+            preopen_orders=sum(len(b._orders) for b in venue.books.values())
             for index in range(args.ticks):
                 await venue.advance_tick()
                 # Counterparty creates real orders and executions. Engineering
                 # fixtures are deliberately not used to estimate profit/rank.
                 if venue.session_open and venue.auction_phase is None:
+                    syms = [x for x in venue.books if not cfg.is_future(x)] if args.all_symbols else ['INTC']
+                    for sym in syms:
+                        mark=venue.ref_prices[sym]
+                        for order in list(venue.books[sym]._orders.values()):
+                            if order.team_id==cp:
+                                await venue._handle_cancel_order(sink,CancelOrder(team_id=cp,symbol=sym,order_id=order.order_id),cp)
+                        for side,price in [('buy',round(mark*.999,2)),('sell',round(mark*1.001,2))]:
+                            await venue._handle_place_order(sink,PlaceOrder(team_id=cp,symbol=sym,side=side,
+                                quantity=100,price=price,order_type='limit'),cp)
                     sym='INTC'; mark=venue.ref_prices[sym]
-                    for order in list(venue.books[sym].orders.values()):
-                        if order.team_id==cp:
-                            await venue._handle_cancel_order(sink,CancelOrder(team_id=cp,symbol=sym,order_id=order.order_id),cp)
-                    for side,price in [('buy',round(mark*.999,2)),('sell',round(mark*1.001,2))]:
-                        await venue._handle_place_order(sink,PlaceOrder(team_id=cp,symbol=sym,side=side,
-                            quantity=100,price=price,order_type='limit'),cp)
                     # An occasional taker tests resting orders without promised fills.
                     if role=='broker' and index%17==0:
                         side='sell' if (index//17)%2==0 else 'buy'
@@ -132,7 +135,7 @@ async def run(args, runtime):
                 rejects=sum('Exchange error [' in s for s in log_path.read_text().splitlines())
             if {s:q for s,q in positions.items() if q}!={s:q for s,q in pf.positions.items() if q}: errors.append('position mismatch')
             if abs(cash-pf.cash)>.01: errors.append(f'cash mismatch {cash-pf.cash}')
-            resting=sum(1 for b in venue.books.values() for o in b.orders.values() if o.team_id==seat)
+            resting=sum(1 for b in venue.books.values() for o in b._orders.values() if o.team_id==seat)
             path=venue.equity_history.get(seat,[])
             result=dict(candidate=args.candidate, week=args.week, seed=args.seed, ticks=venue.tick,
                 mode='realtime' if args.realtime else 'accelerated', tick_seconds=1 if args.realtime else args.tick_seconds,
@@ -140,7 +143,7 @@ async def run(args, runtime):
                 rejects=rejects, forced_reconnects=connects, accounting_errors=errors,
                 liquidated=pf.liquidated, after_close_resting_orders=resting,
                 preopen_orders_all_seats=preopen_orders, cash=pf.cash, positions=pf.positions,
-                score=score_equity(path), log=str(log_path), runtime=str(runtime),
+                score=score_equity([v for _, v in path]), log=str(log_path), runtime=str(runtime),
                 limitations='Controlled liquidity; accelerated timing changes relative latency and cannot establish performance. Venue engine, wire adapters, matching, fees, risk, latency and halt timers unchanged.')
             args.output.write_text(json.dumps(result,indent=2))
             print(json.dumps(result,indent=2))
@@ -162,6 +165,8 @@ def main():
     p.add_argument('--ticks',type=int,default=1100)
     p.add_argument('--tick-seconds',type=float,default=.03)
     p.add_argument('--realtime',action='store_true')
+    p.add_argument('--all-symbols',action='store_true')
+    p.add_argument('--extra-latency',type=float,default=0.0)
     p.add_argument('--reconnect',action='store_true')
     p.add_argument('--output',type=Path,default=ROOT/'research/results/ws_rehearsal.json')
     args=p.parse_args()

@@ -65,6 +65,7 @@ from pydantic import TypeAdapter, ValidationError
 from shared.messages import (AnyExchangeMessage, BookSnapshot, ErrorMsg, Leaderboard, OrderAck,
                              CancelOrder, PlaceOrder, PortfolioUpdate, SessionEvent, TradeExecution)
 from team.ledger import Ledger
+from team.event2 import Event2Config, Event2Engine, NON_SHARE_SYMBOLS
 from team.risk import log_state, acquire_seat_lock
 from week2.week02_alpha_bot import ShockSwitchTrader
 
@@ -83,6 +84,7 @@ SEAT_POSITION_CAP = min(150, max(1, int(os.environ.get("SEAT_POSITION_CAP", "150
 # its registered $175k starting equity. The exchange liquidates below 50%.
 TRADER_STARTING_EQUITY = 175_000.0
 TRADER_GROSS_CAP = 70_000.0
+TRADER_CASH_RESERVE = 0.60   # fraction of starting equity never spent on buys (deployed value)
 TRADER_EQUITY_HALT = 0.70 * TRADER_STARTING_EQUITY
 BUY_FEE_BUFFER = 0.005  # worst-case local allowance beyond published taker fee
 AUCTION_EVENTS = ("SESSION_PREOPEN", "SESSION_PRECLOSE")   # auctions accept limit orders only; we stay out
@@ -103,12 +105,28 @@ LOG_DIR = pathlib.Path(__file__).resolve().parent.parent / "logs"
 WIRE: TypeAdapter[AnyExchangeMessage] = TypeAdapter(AnyExchangeMessage)
 
 
+# Graded season weeks in which this seat may trade (week 5 was the first graded week;
+# weeks 6-10 unlock shorts, post-only, multi-venue, futures ...). Open play (week 0-4) stays disabled.
+GRADED_WEEKS = range(5, 11)
+
+
 class MyTrader(ShockSwitchTrader):
     """ShockSwitchTrader + SHOCK handling + reaction guarantee + reject-free orders + IPO.
     The strategy itself is the parent's event strategy plus the additions above."""
 
-    def __init__(self) -> None:
+    def __init__(self, strategy: str | None = None, event2_config: Event2Config | None = None) -> None:
         super().__init__()
+        self._week = 0
+        # Short-sale gate state (public: scenario flags, SSR_ON / MARKET_STATE). Fails closed.
+        self._shorts_allowed = False
+        self._short_gate_known = False
+        self._ssr: set[str] = set()
+        self._last_market = None
+        self.strategy = (strategy or os.environ.get("TRADER_STRATEGY", "baseline")).lower()
+        if self.strategy not in ("baseline", "event2"):
+            raise ValueError(f"unknown TRADER_STRATEGY {self.strategy!r}")
+        self.event2 = (Event2Engine(self, event2_config or Event2Config.from_env())
+                       if self.strategy == "event2" else None)
         self._venue_tick = 0
         self.ramp_ticks = DEFAULT_RAMP_TICKS
         self.overshoot = DEFAULT_OVERSHOOT
@@ -142,7 +160,7 @@ class MyTrader(ShockSwitchTrader):
         """
         # Primary-market allocations bypass normal order risk checks. Week 5
         # has no IPO event; keep this unrelated exposure path closed.
-        if self._week5_active:
+        if self._week == 5:
             return None
         pf = self._portfolio
         pos = int(pf.positions.get(symbol, 0)) if pf else 0
@@ -163,16 +181,22 @@ class MyTrader(ShockSwitchTrader):
         # The live server switches from open play to Week 5 at 17:00:20.
         # Throw away any old Week-0 trading plans, but NOT real inventory.
         if event == "WEEK_CHANGED":
-            self._week5_active = int(data.get("week", 0)) == 5
+            self._set_week(data)
+            if self.event2:
+                self.event2.reset()
             self.plans.clear()
             self._unanswered.clear()
             self._resume_pending.clear()
             self._resume_sent.clear()
             self._halted_symbols.clear()
             self._market_halted = False
-            logging.info("RISK WEEK %02d — old plans cleared; graded=%s",
-                         int(data.get("week", 0)), self._week5_active)
+            logging.info("RISK WEEK %02d — old plans cleared; graded=%s shorts=%s",
+                         int(data.get("week", 0)), self._week5_active, self._shorts_allowed)
             return
+        if event == "SSR_ON" and data.get("symbol"):
+            self._ssr.add(data["symbol"])
+        if event == "MARKET_STATE":
+            self._ssr.update(data.get("ssr_active", []))
         # Week 5: disable ALL new orders while a circuit breaker is active.
         if event == "TRADING_HALT":
             symbol = data.get("symbol")
@@ -216,15 +240,45 @@ class MyTrader(ShockSwitchTrader):
         if data.get("tick") is not None:
             self._venue_tick = int(data["tick"])
         if event in ("CALENDAR_EVENT", "SHOCK") and data.get("affected"):
+            # Cash-settled futures (ARENA10) are outside this seat's share-only ledger and risk
+            # model: never plan, react to, or trade them (week 9/10 cash divergence defect).
+            data = dict(data, affected=[x for x in data["affected"] if x not in NON_SHARE_SYMBOLS])
             self._unanswered.append((self._venue_tick, set(data["affected"])))
         # Remember the latest ramp shape; SHOCK needs it
         if event == "CALENDAR_EVENT":
             self.ramp_ticks = int(data.get("ramp_ticks") or self.ramp_ticks)
             self.overshoot = float(data.get("overshoot") or self.overshoot)
+        if self.event2 is not None:
+            # Event2 owns event handling; the parent's RIDE/FADE plans are not created.
+            if event == "CALENDAR_EVENT":
+                self.event2.on_calendar(data, self._portfolio, self._last_market)
+            elif event == "SHOCK":
+                self.event2.on_shock(data, self._portfolio, self._last_market)
+            return
         if event == "SHOCK":
             self._on_shock(data)   # we translate SHOCK ourselves; the parent never sees it
             return
         super().on_event(event, message, data)
+
+    def _set_week(self, data: dict) -> None:
+        """Week-aware activation + public short gate. Weeks outside GRADED_WEEKS stay disabled."""
+        week = data.get("week", (data.get("scenario") or {}).get("week"))
+        if week is None:
+            return
+        self._week = int(week)
+        self._week5_active = self._week in GRADED_WEEKS
+        flags = (data.get("scenario") or data).get("flags", {}) or {}
+        self._shorts_allowed = bool(flags.get("shorts_allowed", False)) and self._short_gate_known
+
+    def on_session_open(self, data: dict) -> None:
+        """SESSION_OPEN is not dispatched to on_event by the adapter; the bot calls this."""
+        if not data.get("late_join", False):
+            self._ssr.clear()
+            self._short_gate_known = True
+        else:
+            # A late join/reconnect cannot see SSR it missed: stay long-only until MARKET_STATE says otherwise.
+            self._short_gate_known = self._short_gate_known
+        self._set_week(data)
 
     def _on_shock(self, data: dict) -> None:
         """Turn a SHOCK (target prices, no pct) into one CALENDAR_EVENT per symbol,
@@ -273,8 +327,14 @@ class MyTrader(ShockSwitchTrader):
                 f = self._inflight.get(sym)
                 p.core_sent = p.core_sold + (f[1] if f and f[0] == "sell" else 0)
         # 3. Ask the parent's strategy first; if it has nothing, check the ② reaction guarantee
+        if self.event2 is not None:
+            self._last_market = market
+            self.event2.note_quotes(market)
+            own = self.event2.signal(market, portfolio)
+        else:
+            own = None
         sig = (self._resumption_order(market, portfolio)
-               or super().on_tick(market, portfolio)
+               or (own if self.event2 is not None else super().on_tick(market, portfolio))
                or self._react(market, portfolio))
         # 4. An order for this symbol is still in flight → wait for its fill (never double-send)
         if sig is None or sig.symbol in self._inflight or sig.symbol in self._halted_symbols:
@@ -362,6 +422,8 @@ class MyTrader(ShockSwitchTrader):
 
     def on_fill(self, side: str, symbol: str, quantity: int, price: float) -> None:
         """One of our orders traded (one order may fill in several pieces)."""
+        if self.event2 is not None:
+            self.event2.on_fill(side, symbol, quantity, price)
         super().on_fill(side, symbol, quantity, price)   # the parent updates its plan's share count
         f = self._inflight.get(symbol)
         if f and f[0] == side:
@@ -374,6 +436,8 @@ class MyTrader(ShockSwitchTrader):
         """Avoid stale halt locks if TRADING_RESUMED occurred while disconnected."""
         self._inflight.clear()
         self._resume_sent.clear()
+        self._short_gate_known = False      # SSR/halt state may have changed while disconnected
+        self._shorts_allowed = False
         if self._halted_symbols:
             self._resume_pending.update(self._halted_symbols)
             self._resume_retry_after = self.now() + 5.0
@@ -917,6 +981,7 @@ class _Bot(_AdaptedTraderBot):
             or self._resync
             or self._first_book
             or signal.symbol in self._entry_from_board
+            or signal.symbol in NON_SHARE_SYMBOLS      # futures: share-only ledger/risk cannot account them
             or self._owner._market_halted
             or signal.symbol in self._owner._halted_symbols
             or not self._has_server_snapshot
@@ -931,8 +996,13 @@ class _Bot(_AdaptedTraderBot):
         if not math.isfinite(signal.price) or signal.price <= 0:
             return
         pos = self.portfolio.positions.get(signal.symbol, 0)
+        e2 = self._owner.event2
+        reducing_short = e2 is not None and signal.side == "buy" and pos < 0
 
-        if signal.side == "buy":
+        if reducing_short:
+            # Covering a short only reduces risk: never block it on cash/gross room.
+            qty = min(signal.quantity, -int(pos))
+        elif signal.side == "buy":
             # A hard limit checked at the FINAL outbound order boundary, not
             # just when generating a signal. Long-only and cash-funded.
             refs = self._owner._refs
@@ -955,21 +1025,39 @@ class _Bot(_AdaptedTraderBot):
                    for sym, f in self._owner._inflight.items() if f[0] == "buy"):
                 return
             fee = max(float(self._owner.taker), BUY_FEE_BUFFER)
-            available_cash = max(0.0, (self.portfolio.cash - 0.60 * TRADER_STARTING_EQUITY - pending_buy * (1 + fee)) * 0.95)
-            gross_room = max(0.0, TRADER_GROSS_CAP - gross - pending_buy)
+            available_cash = max(0.0, (self.portfolio.cash - (e2.cfg.cash_reserve if e2 else TRADER_CASH_RESERVE) * TRADER_STARTING_EQUITY - pending_buy * (1 + fee)) * 0.95)
+            gross_room = max(0.0, (e2.cfg.gross_cap if e2 else TRADER_GROSS_CAP) - gross - pending_buy)
             equity = self.portfolio.net_worth(self.market)
             if self._has_server_snapshot and (not equity or equity < TRADER_EQUITY_HALT):
                 return
             qty = min(
                 signal.quantity,
-                max(0, SEAT_POSITION_CAP - pos),
+                max(0, (min(SEAT_POSITION_CAP, e2.cfg.cap_shares) if e2 else SEAT_POSITION_CAP) - pos),
                 int(gross_room // max(signal.price, refs.get(signal.symbol, signal.price))) if signal.price > 0 else 0,
                 int(available_cash // (signal.price * (1 + fee)))
                 if signal.price > 0 else 0,
             )
-        else:
-            # This strategy sells existing long inventory.
+        elif e2 is None or pos > 0:
+            # Baseline sells existing long inventory only; Event2 exits longs the same way.
             qty = min(signal.quantity, max(0, pos))
+        else:
+            # Event2 short entry (pos <= 0): public gate, SSR, caps and equity floor at the boundary.
+            owner = self._owner
+            if not (e2.cfg.enable_short and owner._shorts_allowed and signal.symbol not in owner._ssr):
+                return
+            refs = owner._refs
+            marks = {sym: (refs.get(sym) or self.market.mid_price(sym) or 0.0)
+                     for sym, q in self.portfolio.positions.items() if q}
+            if any(px <= 0 for px in marks.values()):
+                return
+            gross = sum(abs(int(q)) * marks[sym] for sym, q in self.portfolio.positions.items() if q)
+            equity = self.portfolio.net_worth(self.market)
+            if not equity or equity < TRADER_EQUITY_HALT:
+                return
+            ref0 = refs.get(signal.symbol) or self.market.mid_price(signal.symbol) or signal.price
+            qty = min(signal.quantity,
+                      max(0, min(SEAT_POSITION_CAP, e2.cfg.cap_shares) - abs(int(pos))),
+                      int(max(0.0, e2.cfg.gross_cap - gross) // max(ref0, signal.price)))
 
         if qty <= 0:
             return
@@ -1015,10 +1103,10 @@ class _Bot(_AdaptedTraderBot):
         if msg.event == "SESSION_OPEN":
             # A reconnect does not necessarily replay WEEK_CHANGED.
             week = d.get("week", (d.get("scenario") or {}).get("week"))
+            self._owner.on_session_open(d)
             if week is not None:
-                self._owner._week5_active = int(week) == 5
-                logging.info("RISK SESSION WEEK %02d graded=%s",
-                             int(week), self._owner._week5_active)
+                logging.info("RISK SESSION WEEK %02d graded=%s shorts=%s",
+                             int(week), self._owner._week5_active, self._owner._shorts_allowed)
         if msg.event in AUCTION_EVENTS:
             self.auction = True
         elif msg.event in ("SESSION_OPEN", "SESSION_CLOSED"):
