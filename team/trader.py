@@ -1,630 +1,512 @@
 """
-6 Rings — trader bot.
+team/trader.py — 6 Rings trader: two strategies behind one set of hard limits.
 
-The week-2 ShockSwitchTrader plus SHOCK handling, a reaction guarantee,
-a reject-free order flow, an IPO indication, its own books and a
-reconnect loop that survives a full session.
+    RiskTrader       the shared part: hard limits, halts, order lifecycle, equity floor
+    MomentumTrader   the Phase 2 signal (price momentum)
+    EventTrader      the event bot that ran Sessions 3–6 (RIDE / FADE on CALENDAR_EVENT)
+    MyTrader         whichever STRATEGY selects: "momentum" (default) or "event"
 
-Notes:
-- The parent ShockSwitchTrader (week2/week02_alpha_bot.py) does nothing in
-  quiet markets and trades only on a CALENDAR_EVENT (earnings, macro prints):
-    pct > 0 → RIDE: buy at once, sell into the overshoot
-    pct < 0 → FADE: sell what we hold, buy back past the trough, sell the bounce
-- This file adds six things on top of the parent:
-    ① SHOCK: a teacher-injected shock carries target prices but no pct →
-       derive pct ourselves and hand it to the parent's same logic
-    ② Reaction guarantee: at least one order within REACT_AFTER_S seconds of
-       every event (course rule)
-    ③ No rejects:
-         - IOC orders only: any unfilled part is cancelled at once and never
-           piles up on the book
-         - at most one order in flight per symbol (sent, fill not yet back)
-         - update local position and cash on the fill itself, without waiting
-           for the PortfolioUpdate that arrives a few ticks later
-         - per-seat position cap SEAT_POSITION_CAP (the team's 800-share
-           limit is split across the seats)
-         - no orders during the auctions or after the close
-    ④ IPO indication: bid the top of the range, for as many shares as this
-       seat can still hold under its cap, and no more than cash allows
-    ⑤ Books (team/ledger.py): position, average entry, realized/unrealized
-       P&L and fees per symbol, built from fills only, resynced from the
-       exchange on every (re)connect and reconciled against it at the close
-    ⑥ Survival: reconnect with exponential backoff + jitter, rebuild state
-       from the first snapshot after a reconnect, log every handshake, ack,
-       reject and fill to logs/<seat>_<time>.log
+MomentumTrader
+    r = mid now / mid LOOKBACK snapshots ago − 1          (only data up to now)
+    r > ENTRY → buy; sell after HOLD_S, when r turns negative, or STOP under entry.
 
-Run one seat (the seats' SEAT_POSITION_CAP must sum to at most the team limit):
-    TEAM_ID=6_rings_trader_2 TICK_INTERVAL=0.1 SEAT_POSITION_CAP=150 python -m team.trader
+EventTrader — every CALENDAR_EVENT carries the move (pct), its ramp and overshoot
+    pct > 0  RIDE  buy at once (≤ half the move), sell at 90 % of the overshoot peak
+    pct < 0  FADE  sell what we hold before the drop, buy it back (and more) at the
+                   overshoot trough, sell the extra on the rebound
+    A leg is traded only if its designed edge beats the round-trip taker fee.
 
-Record reconnect evidence (drop the socket once, 300 s after start):
-    DROP_AFTER_S=300 TEAM_ID=6_rings_trader_2 python -m team.trader
+Hard limits — every order goes through RiskTrader._check()
+    never short · ≤ SEAT_CAP shares per symbol · the team's position limit · nothing
+    while halted · price inside the LULD band · cash reserve (orders in flight counted)
+    · one order in flight per symbol · below EQUITY_FLOOR × start: sell only
+    · liquidated: nothing · an order within RESUME_S of every TRADING_RESUMED
 
-Backtest on a recorded class session:
-    python week2/week02_event_backtest.py sessions/<tape>.jsonl \\
-        --module team/trader.py --bot MyTrader --tick 0.1
+Run:      TEAM_ID=6_rings_trader_2 [STRATEGY=event] python -m team.trader
+Backtest: python scripts/phase2_sim.py        (MomentumTrader in SimSession — Phase 2)
+          python scripts/phase2_backtest.py   (both strategies on the recorded sessions)
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
+import collections
 import logging
 import os
-import pathlib
-import random
 import time
+from dataclasses import dataclass
 
-import websockets
+from arena import Signal, Trader            # arena must come first: it puts engine/ on sys.path
+import trader.config as _config
 
-from arena import Signal                    # must come first: it puts engine/ on sys.path for the imports below
-from arena.trader import _AdaptedTraderBot  # the SDK plumbing: connect, receive, call on_tick every tick
-import trader.config as _config             # _config.TEAM_ID = the name of this seat
-from trader.trader import MarketData, _print_startup
-from pydantic import TypeAdapter, ValidationError
-from shared.messages import (AnyExchangeMessage, BookSnapshot, ErrorMsg, Leaderboard, OrderAck,
-                             PlaceOrder, PortfolioUpdate, SessionEvent, TradeExecution)
-from team.ledger import Ledger
-from week2.week02_alpha_bot import ShockSwitchTrader
+# Sizing and order prices
+SEAT_CAP = int(os.environ.get("SEAT_POSITION_CAP", "150"))   # shares per symbol, this seat
+ORDER_MAX = 60            # shares per order
+CASH_RESERVE = 0.10       # keep 10 % of net worth in cash
+SLIPPAGE = 0.003          # IOC limit = touch ± 0.3 %
+FEE_BUFFER = 0.004        # cost estimate per share: price × (1 + fee + margin)
 
-# ① A SHOCK carries no ramp shape (ramp_ticks / overshoot): reuse the last CALENDAR_EVENT's
-DEFAULT_RAMP_TICKS = 15       # before any CALENDAR_EVENT has been seen (exchange default)
-DEFAULT_OVERSHOOT = 1.3
-MAX_SHOCK_PCT = 0.20          # a derived move above 20% means our price is stale → don't trade
+# Hard limits
+TEAM_LIMIT = int(os.environ.get("TEAM_POSITION_LIMIT", "1000"))   # scenario position_limit
+TEAM_BUFFER = 50          # leaderboard lag + the broker's resting quotes
+LULD_BAND = 0.075         # the venue rejects prices > 8 % from the mark
+EQUITY_FLOOR = 0.70       # the venue liquidates at 50 %
+HALT_GRACE_S = 30.0       # no RESUMED this long after a halt should have ended → assume resumed
+RESUME_S = 3.0            # an order within 3 s of every resume
+INFLIGHT_TTL_S = 0.3      # an ACK'd IOC is over 0.3 s later
+PENDING_TTL_S = 10.0      # no answer at all → stop waiting
 
-# ② Reaction guarantee
-REACT_AFTER_S = 20.0          # no order for an event after 20 s → send one
-REACT_BID_DISCOUNT = 0.02     # that order: a 1-share IOC bid 2% under the best bid (won't fill, just "reacts")
-
-# ③ No rejects
-INFLIGHT_TTL_S = 0.3          # the exchange acks, then fills: 0.3 s after sending, the unfilled rest is cancelled
-SEAT_POSITION_CAP = int(os.environ.get("SEAT_POSITION_CAP", "150"))   # max shares this seat holds per symbol
-AUCTION_EVENTS = ("SESSION_PREOPEN", "SESSION_PRECLOSE")   # auctions accept limit orders only; we stay out
-
-# ④ IPO
-IPO_CASH_BUFFER = 0.95        # subscribe with at most 95% of cash: an indication above cash is a reject
-
-# ⑤⑥ Books and survival
-BACKOFF_MIN_S, BACKOFF_MAX_S = 1.0, 30.0   # reconnect waits 1 s, 2 s, 4 s … up to 30 s, times a random jitter
-STABLE_S = 30.0                             # a connection that lived 30 s was healthy: restart the backoff at 1 s
-STATUS_EVERY_S = 30.0                       # log the books every 30 s
-ACCRUAL_MAX_ABS, ACCRUAL_MAX_FRAC = 5.0, 1e-4   # largest cash gap per leaderboard row taken as interest/carry
-DROP_AFTER_S = float(os.environ.get("DROP_AFTER_S", "0"))   # > 0: close the socket once after N s (reconnect evidence)
-STATE_DIR = pathlib.Path(__file__).resolve().parent / "state"
-LOG_DIR = pathlib.Path(__file__).resolve().parent.parent / "logs"
-
-# The wire: every exchange → bot frame is one model of this discriminated union on `type`
-WIRE: TypeAdapter[AnyExchangeMessage] = TypeAdapter(AnyExchangeMessage)
+log = logging.getLogger("team.trader")
 
 
-class MyTrader(ShockSwitchTrader):
-    """ShockSwitchTrader + SHOCK handling + reaction guarantee + reject-free orders + IPO.
-    The strategy itself is the parent's event strategy plus the additions above."""
+# ═════════════════════════════════════════════════════════════════════════════
+# The shared part
+# ═════════════════════════════════════════════════════════════════════════════
+
+class RiskTrader(Trader):
+    """Hard limits, halts and the order lifecycle. A strategy implements decide()."""
 
     def __init__(self) -> None:
-        super().__init__()
-        self.ramp_ticks = DEFAULT_RAMP_TICKS
-        self.overshoot = DEFAULT_OVERSHOOT
-        self._unanswered: list[tuple[float, set[str]]] = []   # events not yet answered: (time, symbols)
-        self._inflight: dict[str, list] = {}                  # orders in flight: symbol → [side, unfilled qty, sent at]
-        self._refs: dict[str, float] = {}                     # symbol → the exchange's fair price ref_price (for SHOCK)
-        self._portfolio = None                                # set by _Bot: on_ipo gets no portfolio argument
+        self.now = time.time                  # the backtesters replace this with simulated time
+        self.owe: dict[str, float] = {}       # symbol → some order is due by this time
+        self.halted: dict[str, float] = {}    # symbol → stop waiting for its RESUMED at
+        self.market_halt_until = 0.0
+        self.liquidated = False
+        self.mids: dict[str, float] = {}      # last two-sided mid per symbol
+        # filled in by the live plumbing (team/live.py)
+        self.start_nw = float(os.environ.get("STARTING_CASH", "0"))
+        self._board_nw = 0.0
+        self.team_board: dict[str, int] = {}
+        self.my_board: dict[str, int] = {}
+        self._refs: dict[str, float] = {}
+        self._portfolio = None
+        self._inflight: dict[str, list] = {}  # symbol → [side, qty, price, t, acked]
+        self._pending: collections.deque[str] = collections.deque()
 
-    # ------------------------------------------------------------------
-    # Exchange events
-    # ------------------------------------------------------------------
-
-    def on_ipo(self, symbol: str, lo: float, hi: float, shares: int, data: dict):
-        """IPO book opened. Return (quantity, max_price), or None to pass.
-        Called once when the book opens (and again after a reconnect; a new
-        indication replaces the old one).
-
-        - Price: the top of the range, hi → we are sure to be allocated
-          (an oversubscribed book is cut back pro rata, so we can only get
-          fewer shares, never more)
-        - Size: what this seat can still hold under its cap. Allocated shares
-          skip the exchange's position check, but every later order (sells
-          included) must respect the team limit, so never bid above the cap.
-        """
-        pf = self._portfolio
-        pos = int(pf.positions.get(symbol, 0)) if pf else 0
-        qty = min(SEAT_POSITION_CAP - max(pos, 0), shares)    # room left under the cap, at most the deal size
-        if pf and hi > 0:
-            qty = min(qty, int(pf.cash * IPO_CASH_BUFFER // hi))   # shares our cash can pay for
-        if qty <= 0:
-            logging.info("IPO %s: no room under the %d-share seat cap — passing",
-                         symbol, SEAT_POSITION_CAP)
-            return None
-        logging.info("IPO %s: indicating %d up to $%.2f (range $%.2f–%.2f, %d offered)",
-                     symbol, qty, hi, lo, hi, shares)
-        return qty, hi
-
-    def on_event(self, event: str, message: str, data: dict) -> None:
-        """Market news arrives here (CALENDAR_EVENT, SHOCK, DIVIDEND, IPO_* …).
-        The parent only handles CALENDAR_EVENT; we do our part first."""
-        # An event that names symbols → remember it for the ② reaction guarantee
-        if event in ("CALENDAR_EVENT", "SHOCK") and data.get("affected"):
-            self._unanswered.append((self.now(), set(data["affected"])))
-        # Remember the latest ramp shape; SHOCK needs it
-        if event == "CALENDAR_EVENT":
-            self.ramp_ticks = int(data.get("ramp_ticks") or self.ramp_ticks)
-            self.overshoot = float(data.get("overshoot") or self.overshoot)
-        if event == "SHOCK":
-            self._on_shock(data)   # we translate SHOCK ourselves; the parent never sees it
-            return
-        super().on_event(event, message, data)
-
-    def _on_shock(self, data: dict) -> None:
-        """Turn a SHOCK (target prices, no pct) into one CALENDAR_EVENT per symbol,
-        so the parent's RIDE/FADE logic runs unchanged.
-
-        The exchange walks the fair price to the target, so pct = target / fair − 1.
-        The book mid can sit far from the fair price, so ref_price comes first
-        and the mid is only a fallback.
-        """
-        targets = data.get("prices") or {}             # symbol → target price
-        for sym in data.get("affected") or []:
-            pre = self._refs.get(sym) or self._mids.get(sym)
-            target = targets.get(sym)
-            if not pre or not target or sym in self.plans:
-                continue    # unseen symbol / no target / a plan already running → skip
-            pct = float(target) / pre - 1.0
-            if abs(pct) > MAX_SHOCK_PCT:
-                continue
-            super().on_event("CALENDAR_EVENT", "", {
-                "pct": pct, "ramp_ticks": self.ramp_ticks,
-                "overshoot": self.overshoot, "affected": [sym],
-            })
-
-    # ------------------------------------------------------------------
-    # Per-tick decision
-    # ------------------------------------------------------------------
-
-    def on_tick(self, market, portfolio):
-        """Called every tick. Return at most one Signal, or None to sit out."""
-        now = self.now()
-        # 1. Forget orders in flight for longer than INFLIGHT_TTL_S: the IOC's unfilled rest is long cancelled
-        self._inflight = {s: f for s, f in self._inflight.items() if now - f[2] < INFLIGHT_TTL_S}
-        # 2. Correct the parent's count: in the derisk (sell-down) phase it uses core_sent as
-        #    "shares sent to sell", but an IOC may not fill, so count only what actually sold
-        #    plus what is still in flight
-        for sym, p in self.plans.items():
-            if p.state == "derisk":
-                f = self._inflight.get(sym)
-                p.core_sent = p.core_sold + (f[1] if f and f[0] == "sell" else 0)
-        # 3. Ask the parent's strategy first; if it has nothing, check the ② reaction guarantee
-        sig = super().on_tick(market, portfolio) or self._react(market, portfolio)
-        # 4. An order for this symbol is still in flight → wait for its fill (never double-send)
-        if sig is None or sig.symbol in self._inflight:
-            return None
-        # 5. An order for this symbol counts as a reaction to every event that named it
-        self._unanswered = [(t, s) for t, s in self._unanswered if sig.symbol not in s]
-        return sig
-
-    def _size(self, sym: str, px: float, nw: float, pos: int) -> int:
-        """The parent's size, capped so the seat never exceeds its share of the team limit."""
-        return max(0, min(super()._size(sym, px, nw, pos), SEAT_POSITION_CAP - max(pos, 0)))
-
-    def _react(self, market, portfolio):
-        """② A 1-share bid well under the market for an event nothing else answered
-        within REACT_AFTER_S seconds."""
-        now = self.now()
-        for t, syms in self._unanswered:
-            if now - t < REACT_AFTER_S:
-                continue                    # too early: the parent may still trade it
-            for sym in sorted(syms):
-                ref = market.best_bid(sym) or self._mids.get(sym)
-                if ref and portfolio.can_buy(sym, 1, ref):
-                    return Signal(symbol=sym, side="buy", quantity=1,
-                                  price=round(ref * (1 - REACT_BID_DISCOUNT), 2))
+    def decide(self, market, portfolio, now: float) -> Signal | None:
+        """The strategy: at most one order (already passed through _check)."""
         return None
 
-    # ------------------------------------------------------------------
-    # Order callbacks (called by _Bot)
-    # ------------------------------------------------------------------
+    # ── every tick ──────────────────────────────────────────────────────
+
+    def on_tick(self, market, portfolio):
+        now = self.now()
+        self._inflight = {s: f for s, f in self._inflight.items()
+                          if now - f[3] < (INFLIGHT_TTL_S if f[4] else PENDING_TTL_S)}
+        if self.liquidated:
+            return None
+        for s in market.symbols():           # a one-sided book's mid is a model value, not a price
+            if market.best_bid(s) and market.best_ask(s) and (mid := market.mid_price(s)):
+                self.mids[s] = mid
+        if self.below_floor():                                       # sell everything
+            for s, pos in portfolio.positions.items():
+                bid = market.best_bid(s)
+                if pos > 0 and bid and (sig := self._order(s, "sell", pos, bid, portfolio)):
+                    return sig
+            return None
+        return self.decide(market, portfolio, now) or self._reaction(market, portfolio, now)
+
+    def _reaction(self, market, portfolio, now):
+        """A 1-share IOC far from the market for every resume (and event) nothing else answered."""
+        for s, due in list(self.owe.items()):
+            bid = market.best_bid(s)
+            if now < due or not bid or self.is_halted(s):
+                continue
+            sig = self._check(Signal(symbol=s, side="buy", quantity=1, price=round(bid * 0.98, 2)),
+                              portfolio)
+            if sig:
+                return sig
+        return None
+
+    def _order(self, s: str, side: str, qty: int, touch: float, portfolio) -> Signal | None:
+        px = touch * (1 + SLIPPAGE) if side == "buy" else touch * (1 - SLIPPAGE)
+        return self._check(Signal(symbol=s, side=side, quantity=qty, price=round(px, 2)), portfolio)
+
+    # ── venue events: halts and liquidation ─────────────────────────────
+
+    def on_event(self, event: str, message: str, data: dict) -> None:
+        sym, now = data.get("symbol"), self.now()
+        if event == "TRADING_HALT" and sym:
+            self.halt(sym, float(data.get("duration") or 300.0), data.get("reason", ""))
+        elif event == "TRADING_RESUMED" and sym:
+            self.halted.pop(sym, None)
+            self.owe[sym] = now + RESUME_S
+            log.info("RESUME %s — an order goes out within %.0f s", sym, RESUME_S)
+        elif event == "MARKET_HALT":
+            self.market_halt_until = now + float(data.get("duration") or 300.0) + HALT_GRACE_S
+        elif event == "MARKET_RESUMED":
+            self.market_halt_until = 0.0
+            for s in self.mids:
+                self.owe[s] = now + RESUME_S
+        elif event == "LIQUIDATION" and data.get("team_id") == _config.TEAM_ID:
+            self.liquidated = True
+
+    def halt(self, symbol: str, duration: float, reason: str = "") -> None:
+        self.halted[symbol] = self.now() + duration + HALT_GRACE_S
+        log.warning("HALT %s for %.0f s %s — nothing is sent", symbol, duration, reason)
+
+    def is_halted(self, symbol: str) -> bool:
+        now = self.now()
+        if now < self.market_halt_until:
+            return True
+        until = self.halted.get(symbol)
+        if until is not None and now >= until:              # missed the RESUMED
+            del self.halted[symbol]
+            self.owe[symbol] = now
+            return False
+        return until is not None
+
+    # ── hard limits: the last word on every order ───────────────────────
+
+    def _check(self, sig: Signal, portfolio) -> Signal | None:
+        s = sig.symbol
+        if self.liquidated or self.is_halted(s) or s in self._inflight:
+            return None
+        pos = portfolio.positions.get(s, 0)
+        qty = min(int(sig.quantity), ORDER_MAX)
+        if sig.side == "sell":
+            qty = min(qty, pos)                                          # never short
+        else:
+            others = self.team_board.get(s, 0) - self.my_board.get(s, 0)
+            qty = min(qty, SEAT_CAP - pos, TEAM_LIMIT - TEAM_BUFFER - others - pos,
+                      self._affordable(sig.price, portfolio))
+        if qty <= 0:
+            return None
+        price, mark = sig.price, self._refs.get(s)        # the venue's own mark (ref_price)
+        if mark:
+            price = min(max(price, mark * (1 - LULD_BAND)), mark * (1 + LULD_BAND))
+        return Signal(symbol=s, side=sig.side, quantity=qty, price=round(price, 2))
+
+    def _affordable(self, price: float, portfolio) -> int:
+        spent = sum(f[1] * f[2] for f in self._inflight.values() if f[0] == "buy")
+        cash = portfolio.cash - spent - CASH_RESERVE * (self._board_nw or portfolio.cash)
+        return max(0, int(cash / (price * (1 + FEE_BUFFER))))
+
+    def _net_worth(self, portfolio) -> float:
+        return portfolio.cash + sum(q * self.mids.get(s, 0.0) for s, q in portfolio.positions.items())
+
+    def below_floor(self) -> bool:
+        return bool(self.start_nw and self._board_nw and self._board_nw < EQUITY_FLOOR * self.start_nw)
+
+    # ── order lifecycle (called by team/live.py and the backtesters) ────
 
     def on_sent(self, sig: Signal) -> None:
-        """The order really went out → mark it in flight."""
-        self._inflight[sig.symbol] = [sig.side, sig.quantity, self.now()]
+        self._inflight[sig.symbol] = [sig.side, sig.quantity, sig.price, self.now(), False]
+        self._pending.append(sig.symbol)
+        self.owe.pop(sig.symbol, None)                   # any order answers a reaction
+
+    def on_answer(self, symbol: str | None) -> None:
+        """ACK (names the symbol) or reject (names nothing: the oldest unanswered order)."""
+        if symbol is None:
+            if self._pending and (f := self._inflight.get(self._pending.popleft())) and not f[4]:
+                f[3] = -1e18                             # rejected → over now
+            return
+        if symbol in self._pending:
+            self._pending.remove(symbol)
+        if (f := self._inflight.get(symbol)) and not f[4]:
+            f[3], f[4] = self.now(), True
 
     def on_fill(self, side: str, symbol: str, quantity: int, price: float) -> None:
-        """One of our orders traded (one order may fill in several pieces)."""
-        super().on_fill(side, symbol, quantity, price)   # the parent updates its plan's share count
-        f = self._inflight.get(symbol)
-        if f and f[0] == side:
-            f[1] -= quantity                 # take the filled part off the in-flight quantity
+        if (f := self._inflight.get(symbol)) and f[0] == side:
+            f[1] -= quantity
             if f[1] <= 0:
-                del self._inflight[symbol]   # fully filled → this symbol may send its next order
+                del self._inflight[symbol]
 
     def on_reconnect(self) -> None:
-        """New socket: orders in flight on the old one are gone (an IOC is already done)."""
         self._inflight.clear()
+        self._pending.clear()
 
     def run(self) -> None:
-        """Connect and trade; log to the terminal (coloured) AND to logs/<seat>_<time>.log (plain)."""
-        LOG_DIR.mkdir(exist_ok=True)
-        logfile = LOG_DIR / f"{_config.TEAM_ID}_{time.strftime('%Y%m%d_%H%M%S')}.log"
-        plain = logging.Formatter("%(asctime)s %(levelname)-7s %(message)s", datefmt="%H:%M:%S")
-        terminal = logging.StreamHandler()
-        use_colour = terminal.stream.isatty() and "NO_COLOR" not in os.environ
-        terminal.setFormatter(_ColourFormatter() if use_colour else plain)
-        to_file = logging.FileHandler(logfile)
-        to_file.setFormatter(plain)
-        logging.basicConfig(level=logging.INFO, force=True, handlers=[terminal, to_file])
-        _print_startup()
-        logging.info("Session log → %s", logfile)
-        asyncio.run(_Bot(self).run())
+        from team.live import run_live
+        run_live(self)
 
 
-class _ColourFormatter(logging.Formatter):
-    """Terminal-only colours: the level, plus the tag that starts each of our lines."""
+# ═════════════════════════════════════════════════════════════════════════════
+# Strategy 1 — momentum (the Phase 2 signal)
+# ═════════════════════════════════════════════════════════════════════════════
 
-    LEVELS = {"DEBUG": "2", "INFO": "32", "WARNING": "33", "ERROR": "31", "CRITICAL": "1;31"}
-    TAGS = {
-        "TICK": "36", "BOOKS": "1;34", "FILL": "1;35", "Order": "35", "ACK": "2",
-        "CONNECT": "1;32", "RESYNC": "32", "RECONCILE": "1;32", "SESSION": "1;36",
-        "DISCONNECT": "1;31", "RECONNECT": "33", "INDUCED": "1;33", "REJECT": "1;31",
-        "IPO": "1;36", "Session": "33",
-    }
+@dataclass
+class Position:
+    """One momentum trade in one symbol."""
+
+    t: float              # when we decided to buy
+    entry: float          # the ask at that moment
+    want: int = 0         # shares to buy (set at the first order)
+    qty: int = 0          # shares held from this trade
+    exiting: bool = False
+
+
+class MomentumTrader(RiskTrader):
+    """Buy short-term strength, sell when it fades.
+    LOOKBACK and ENTRY were chosen on SimSession seeds 0–9 only (BACKTEST.md)."""
+
+    LOOKBACK = 60          # snapshots      — the training-grid choice (scripts/phase2_sim.py)
+    ENTRY = 0.01           # +1 % over the lookback
+    HOLD_S = 60.0
+    STOP = 0.01            # 1 % under the entry
+    COOLDOWN_S = 60.0      # after an exit, wait before buying that symbol again
+    RISK_FRACTION = 0.2    # one position uses at most 20 % of net worth
+    ENTRY_WINDOW_S = 5.0   # keep trying to fill an entry for this long
+    SIGNAL_DELAY = 0       # backtest only: read the feature this many snapshots late
 
     def __init__(self) -> None:
-        super().__init__("%(message)s")
-
-    def format(self, record: logging.LogRecord) -> str:
-        body = super().format(record)                 # message (+ traceback, if any)
-        tag, sep, rest = body.partition(" ")
-        colour = self.TAGS.get(tag.rstrip(":"))
-        if colour:
-            body = f"\033[{colour}m{tag}\033[0m{sep}{rest}"
-        lvl = record.levelname
-        when = self.formatTime(record, "%H:%M:%S")
-        return f"\033[2m{when}\033[0m \033[{self.LEVELS.get(lvl, '0')}m{lvl:<7}\033[0m {body}"
-
-
-# ---------------------------------------------------------------------------
-# _Bot: the SDK plumbing, changed where it would cause a reject or lose state
-# ---------------------------------------------------------------------------
-
-class _RefMarket(MarketData):
-    """SDK MarketData that also keeps the exchange's ref_price.
-
-    The SDK drops ref_price, and it builds a fresh MarketData on every connect,
-    so wrapping update_book once in __init__ is lost the moment we connect.
-    """
-
-    def __init__(self, refs: dict[str, float]) -> None:
         super().__init__()
-        self._refs = refs
+        self.open: dict[str, Position] = {}
+        self.cooldown: dict[str, float] = {}
 
-    def update_book(self, snapshot: BookSnapshot) -> None:
-        super().update_book(snapshot)
-        if snapshot.ref_price:
-            self._refs[snapshot.symbol] = snapshot.ref_price
+    def momentum(self, market, s: str) -> float | None:
+        """r = mid now / mid LOOKBACK snapshots ago − 1, read SIGNAL_DELAY snapshots late."""
+        h, d, n = list(market.prices(s)), self.SIGNAL_DELAY, self.LOOKBACK
+        if len(h) < n + 1 + d or not h[-1 - d - n]:
+            return None
+        return h[-1 - d] / h[-1 - d - n] - 1.0
 
-
-class _Bot(_AdaptedTraderBot):
-    """The stock plumbing, changed where it would cause a reject or lose state."""
-
-    auction = False     # True = an auction is running, send nothing
-
-    def __init__(self, owner: MyTrader) -> None:
-        super().__init__(owner)
-        owner._portfolio = self.portfolio   # lets on_ipo read cash and positions
-        self._state_path = STATE_DIR / f"{_config.TEAM_ID}.json"
-        self.ledger = Ledger.load(self._state_path)
-        self.rejects = 0
-        self._connects = 0
-        self._resync = False        # next PortfolioUpdate / leaderboard row: rebuild the books from the exchange
-        self._first_book = False    # next BookSnapshot: log that the book was rebuilt
-        self._closing = False       # next PortfolioUpdate / leaderboard row after the close: reconcile
-        self._last_row: dict | None = None   # our latest leaderboard row = what the dashboard shows
-        self._unknown_tags: set[str] = set()  # message types outside the union, logged once each
-        self._ipo_pending: set[str] = set()
-        self._entry_from_board: set[str] = set()   # symbols whose entry the next leaderboard row sets
-        self._t0 = time.monotonic()
-        self._dropped = False
-
-    # ── Connection: exponential backoff + jitter ─────────────────────────
-
-    async def run(self) -> None:
-        """Connect and trade; on any drop, reconnect with exponential backoff."""
-        delay = BACKOFF_MIN_S
-        while True:
-            up_since = time.monotonic()
-            try:
-                await self.connect()                            # sends the Handshake
-                self._connects += 1
-                logging.info("CONNECT #%d as %s", self._connects, _config.TEAM_ID)
-                self._session_open = False                      # the exchange re-sends SESSION_OPEN to late joiners
-                self.market = _RefMarket(self._owner._refs)     # the old book is stale: rebuild from new snapshots
-                self._owner.on_reconnect()
-                self._resync = self._first_book = True
-                tasks = [asyncio.create_task(self.trading_loop()),
-                         asyncio.create_task(self._housekeeping())]
-                try:
-                    await self.listen()                         # returns or raises when the socket drops
-                finally:
-                    for t in tasks:
-                        t.cancel()
-                    for t in tasks:
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await t
-                logging.warning("DISCONNECT: exchange closed the connection")
-            except websockets.exceptions.ConnectionClosed as exc:
-                logging.warning("DISCONNECT: %s", exc)
-            except OSError as exc:
-                logging.warning("DISCONNECT: cannot reach exchange (%s)", exc)
-            except Exception:
-                logging.exception("DISCONNECT: unexpected error")
-            finally:
-                if self._ws:
-                    with contextlib.suppress(Exception):
-                        await self._ws.close()
-            if time.monotonic() - up_since > STABLE_S:
-                delay = BACKOFF_MIN_S                           # that connection was healthy → restart the backoff
-            wait = delay * random.uniform(0.5, 1.0)             # jitter: don't reconnect in lockstep with every bot
-            logging.warning("RECONNECT in %.1fs", wait)
-            await asyncio.sleep(wait)
-            delay = min(delay * 2, BACKOFF_MAX_S)
-
-    # ── Incoming: the SDK dispatcher + ack/reject logging + books ────────
-
-    async def listen(self) -> None:
-        """Typed dispatch of every frame.
-
-        Each raw frame goes straight through the discriminated union on `type`
-        (WIRE.validate_json): one call picks the model and validates every
-        field — no json.loads, no dict lookups. A bad or unknown frame is
-        rejected at this boundary and never reaches the trading logic.
-        """
-        async for raw in self._ws:
-            try:
-                msg = WIRE.validate_json(raw)
-            except ValidationError as exc:
-                err = exc.errors()[0]
-                if err["type"] == "union_tag_invalid":       # a type we don't model (e.g. teacher-only)
-                    tag = err.get("ctx", {}).get("tag", "?")
-                    if tag not in self._unknown_tags:
-                        self._unknown_tags.add(tag)
-                        logging.info("Ignoring unmodelled message type %r", tag)
-                else:
-                    logging.warning("Malformed frame dropped: %s at %s — %s",
-                                    err["type"], err.get("loc"), err.get("msg"))
+    def decide(self, market, portfolio, now):
+        self.open = {s: p for s, p in self.open.items()               # entries that never filled
+                     if p.qty > 0 or now <= p.t + self.ENTRY_WINDOW_S}
+        for s in market.symbols():                                   # new signals
+            ask, r = market.best_ask(s), self.momentum(market, s)
+            if ask and r is not None and r > self.ENTRY and s not in self.open \
+                    and now >= self.cooldown.get(s, 0.0):
+                self.open[s] = Position(now, ask)
+        for s, p in list(self.open.items()):                         # exits first
+            if p.qty > 0 and (p.exiting or self._exit_due(p, market, s, now)):
+                p.exiting = True
+                bid = market.best_bid(s)
+                if bid and (sig := self._order(s, "sell", p.qty, bid, portfolio)):
+                    return sig
+        for s, p in self.open.items():                               # then entries
+            ask = market.best_ask(s)
+            if p.exiting or not ask or ask > p.entry * (1 + SLIPPAGE) or now > p.t + self.ENTRY_WINDOW_S:
                 continue
-            if isinstance(msg, BookSnapshot):
-                self.market.update_book(msg)
-                if self._first_book:
-                    self._first_book = False
-                    logging.info("RESYNC book from first snapshot (%s bid %s ask %s)",
-                                 msg.symbol, self.market.best_bid(msg.symbol),
-                                 self.market.best_ask(msg.symbol))
-            elif isinstance(msg, TradeExecution):
-                self.market.update_trade(msg)
-                self._on_trade(msg)
-            elif isinstance(msg, PortfolioUpdate):
-                self.portfolio.apply_server_update(msg)
-                self._on_portfolio(msg)
-            elif isinstance(msg, SessionEvent):
-                await self._on_session_event(msg)
-            elif isinstance(msg, OrderAck):
-                logging.info("ACK %s %s %d %s @ %.2f", msg.order_id[:8],
-                             msg.side, msg.quantity, msg.symbol, msg.price)
-            elif isinstance(msg, ErrorMsg):
-                self.rejects += 1
-                logging.warning("REJECT #%d [%s] %s", self.rejects, msg.code, msg.message)
-            elif isinstance(msg, Leaderboard):
-                self._on_leaderboard(msg)
+            p.want = p.want or int(self.RISK_FRACTION * self._net_worth(portfolio) / ask)
+            if p.qty < p.want and (sig := self._check(Signal(
+                    symbol=s, side="buy", quantity=p.want - p.qty,
+                    price=round(min(ask * (1 + SLIPPAGE), p.entry * (1 + SLIPPAGE)), 2)), portfolio)):
+                return sig
+        return None
 
-    def _on_trade(self, msg: TradeExecution) -> None:
-        """A trade printed. If it is ours: books first (authoritative), then patch
-        the SDK portfolio at once.
+    def _exit_due(self, p: Position, market, s: str, now: float) -> bool:
+        r = self.momentum(market, s)
+        return (now >= p.t + self.HOLD_S or self.mids.get(s, p.entry) <= p.entry * (1 - self.STOP)
+                or (r is not None and r < 0))
 
-        The exchange's PortfolioUpdate lags by a few ticks; without the patch the
-        next sell would be sized on a stale position and could turn into a short.
-        """
-        me = _config.TEAM_ID
-        if me not in (msg.buyer_id, msg.seller_id):
-            return                               # someone else's trade
-        side = "buy" if msg.buyer_id == me else "sell"
-        # The stock _on_trade only logs (with fee / 2, which is wrong: fee is the
-        # full taker fee) and calls on_fill — so call on_fill directly instead
-        self._owner.on_fill(side, msg.symbol, msg.quantity, msg.price)
-        fee = msg.fee if msg.taker_id == me else (-msg.maker_rebate if msg.maker_id == me else 0.0)
-        self.ledger.apply_fill(side, msg.symbol, msg.quantity, msg.price, fee)
-        d = msg.quantity if side == "buy" else -msg.quantity
-        self.portfolio.positions[msg.symbol] = self.portfolio.positions.get(msg.symbol, 0) + d
-        self.portfolio.cash -= d * msg.price
-        refs = self._owner._refs
-        logging.info("FILL %s %d %s @ %.2f (fee %.2f) → %s · %s", side, msg.quantity, msg.symbol,
-                     msg.price, fee, self.ledger.position_line(msg.symbol, refs),
-                     self.ledger.summary(refs))
+    def on_fill(self, side: str, symbol: str, quantity: int, price: float) -> None:
+        if p := self.open.get(symbol):
+            p.qty += quantity if side == "buy" else -min(quantity, p.qty)
+            if p.exiting and p.qty <= 0:
+                del self.open[symbol]
+                self.cooldown[symbol] = self.now() + self.COOLDOWN_S
+        super().on_fill(side, symbol, quantity, price)
 
-    def _on_portfolio(self, msg: PortfolioUpdate) -> None:
-        """Resync after a connect, book non-trade position changes, reconcile at the close.
 
-        The exchange pushes a PortfolioUpdate after each of our fills and on
-        every change it makes without a trade print. A position change that no
-        fill explains is booked only for a known reason — an IPO allocation, or
-        the starting-share grant (sent just before the pre-open / open event) —
-        and anything else is left to show up as a MISMATCH, because it is a bug.
-        """
-        state = self._update_state(msg)
-        if self._resync:
-            self._sync("PortfolioUpdate", state)
-            return
-        moved = {s: msg.positions.get(s, 0) - self.ledger.positions.get(s, 0)
-                 for s in set(msg.positions) | set(self.ledger.positions)}
-        moved = {s: d for s, d in moved.items() if d}
-        if moved and not self._owner._inflight:
-            if set(moved) <= self._ipo_pending:
-                for sym, got in moved.items():
-                    offer = round((self.ledger.cash - msg.cash) / got, 2)
-                    self.ledger.apply_allocation(sym, got, offer)
-                    self._ipo_pending.discard(sym)
-                    self._entry_from_board.add(sym)
-                    logging.info("IPO ALLOCATED %d %s @ %.2f", got, sym, offer)
-            elif not self._session_open and all(d > 0 for d in moved.values()):
-                for sym, got in sorted(moved.items()):
-                    self.ledger.apply_grant(sym, got, self._owner._refs.get(sym, 0.0))
-                    self._entry_from_board.add(sym)
-                logging.info("GRANT starting shares (no trade print): %s",
-                             ", ".join(f"+{d} {s}" for s, d in sorted(moved.items())))
-        if self._closing:
-            self._reconcile_close("PortfolioUpdate", state)
+# ═════════════════════════════════════════════════════════════════════════════
+# Strategy 2 — the event bot (RIDE / FADE)
+# ═════════════════════════════════════════════════════════════════════════════
 
-    def _on_leaderboard(self, msg: Leaderboard) -> None:
-        """Keep our own leaderboard row: cash, positions, avg_cost, realized P&L, fees.
+@dataclass
+class Plan:
+    """What the bot does in one symbol after one event."""
 
-        The exchange sends no PortfolioUpdate when an existing seat reconnects
-        (only on fills, dividends, IPO allocations…), but it broadcasts the
-        leaderboard every tick, and our row is exactly what the dashboard shows.
-        Also logs one TICK line per broadcast (replaces the stock rich print,
-        whose rank was always "#?": the rows carry no rank, the list order is it).
-        """
-        for board in (msg.traders, msg.brokers):     # each list is sorted by net worth
-            rank = next((i for i, e in enumerate(board, 1)
-                         if e.get("team_id") == _config.TEAM_ID), None)
-            if rank is not None:
-                row = board[rank - 1]
-                break
-        else:
-            return
-        self._last_row = row
-        logging.info("TICK %d · rank %d/%d · net_worth %s · realized %s · unrealized %s",
-                     msg.tick, rank, len(board), f"{row.get('net_worth', 0.0):,.2f}",
-                     f"{row.get('realized_pnl', 0.0):+,.2f}", f"{row.get('unrealized_pnl', 0.0):+,.2f}")
-        state = self._row_state(row)
-        if self._resync:
-            self._sync("leaderboard", state)
-            return
-        # Grants / IPO allocations: the exchange's own book cost replaces our mark
-        for sym in list(self._entry_from_board):
-            if state["avg_cost"].get(sym):
-                self.ledger.avg_entry[sym] = state["avg_cost"][sym]
-                self._entry_from_board.discard(sym)
-        # Interest on idle cash and margin carry accrue every tick with no message:
-        # take the cash gap as a non-trade flow — but only a plausible one
-        gap = state["cash"] - self.ledger.cash
-        limit = max(ACCRUAL_MAX_ABS, ACCRUAL_MAX_FRAC * abs(self.ledger.cash))
-        if gap and not self._owner._inflight and abs(gap) <= limit:
-            self.ledger.accrue(gap)
-        if self._closing:
-            self._reconcile_close("leaderboard", state)
+    mode: str             # "ride" or "fade"
+    pre: float            # mid just before the event
+    pct: float            # announced move
+    overshoot: float
+    t0: float
+    ramp_s: float
+    state: str            # ride: enter → hold → done;  fade: derisk → wait → enter → hold → restore → done
+    target: int = 0       # extra shares this plan buys
+    held: int = 0         # of those, currently held
+    entry_px: float = 0.0
+    core0: int = -1       # shares we held when the news broke
+    core_sold: int = 0    # … sold before the drop
+    core_back: int = 0    # … bought back
+    extra_ok: bool = True
+
+
+class EventTrader(RiskTrader):
+    """The Sessions 3–6 event bot (week-2 ShockSwitchTrader logic), every order behind _check."""
+
+    TAKER = 0.003          # updated by FEE_SCHEDULE
+    RISK_FRACTION = 0.25   # one plan uses at most 25 % of net worth …
+    MAX_SHARES = 200       # … and at most 200 shares
+    ENTRY_SLIPPAGE = 0.5   # RIDE: pay at most pre × (1 + 0.5 × pct)
+    RIDE_TAKE = 0.9        # RIDE: exit at 90 % of the overshoot peak
+    RIDE_TIME_STOP = 3.0   # × ramp
+    FADE_STOP = 0.015      # FADE: stop 1.5 % under the entry
+    FADE_TIME_STOP = 6.0   # × ramp
+    KILL_SWITCH = 0.03     # no new plans after a 3 % drawdown from the high
+    REACT_S = 20.0         # course rule: some order within 20 s of every event
+    MAX_SHOCK = 0.20       # a derived SHOCK move above 20 % means our price is stale
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.plans: dict[str, Plan] = {}
+        self.ramp_ticks, self.overshoot = 15, 1.3
+        self.peak_nw = 0.0
+
+    # ── news → plans ────────────────────────────────────────────────────
+
+    def on_event(self, event: str, message: str, data: dict) -> None:
+        super().on_event(event, message, data)
+        if event == "FEE_SCHEDULE" and data.get("taker") is not None:
+            self.TAKER = float(data["taker"])
+        elif event == "CALENDAR_EVENT":
+            self.ramp_ticks = int(data.get("ramp_ticks") or self.ramp_ticks)
+            self.overshoot = float(data.get("overshoot") or self.overshoot)
+            self.news(float(data.get("pct") or 0.0), data.get("affected") or [])
+        elif event == "SHOCK":                                       # carries targets, not pct
+            for s, target in (data.get("prices") or {}).items():
+                ref = self._refs.get(s) or self.mids.get(s)
+                if ref and abs(float(target) / ref - 1) <= self.MAX_SHOCK:
+                    self.news(float(target) / ref - 1.0, [s])
+
+    def news(self, pct: float, symbols: list[str]) -> None:
+        now, ov, cost = self.now(), self.overshoot, 2 * self.TAKER    # taker fee in AND out
+        ride_edge = (self.RIDE_TAKE * ov - self.ENTRY_SLIPPAGE) * pct   # buy ≤ half-way, sell at 90 % of peak
+        drop_edge = (ov - 0.5) * abs(pct)                               # sell ≥ half-way down
+        rebound_edge = (ov - 1.0) * abs(pct)                            # trough → settle
+        for s in symbols:
+            self.owe.setdefault(s, now + self.REACT_S)
+            pre = self.mids.get(s)
+            if not pre or s in self.plans or (ride_edge if pct > 0 else drop_edge) <= cost:
+                continue
+            mode = "ride" if pct > 0 else "fade"
+            self.plans[s] = Plan(mode, pre, pct, ov, now, self.ramp_ticks * 1.0,
+                                 "enter" if mode == "ride" else "derisk",
+                                 extra_ok=mode == "ride" or rebound_edge > cost)
+            log.info("EVENT %s %+.1f%% → %s", s, pct * 100, mode.upper())
+
+    # ── plans → one order ───────────────────────────────────────────────
+
+    def decide(self, market, portfolio, now):
+        nw = self._net_worth(portfolio)
+        self.peak_nw = max(self.peak_nw, nw)
+        killed = nw < self.peak_nw * (1 - self.KILL_SWITCH)
+        orders = []
+        for s, p in list(self.plans.items()):
+            if self.is_halted(s):
+                continue                                             # a halted plan is frozen
+            sig, urgency = self._step(p, s, market, portfolio, nw, killed, now)
+            if p.state == "done":
+                del self.plans[s]
+            if sig:
+                orders.append((urgency, sig))
+        # the most urgent plan only: if the limits stop it, nothing goes out this tick
+        return self._check(max(orders, key=lambda o: o[0])[1], portfolio) if orders else None
+
+    def _step(self, p: Plan, s: str, market, portfolio, nw: float, killed: bool, now: float):
+        bid, ask = market.best_bid(s), market.best_ask(s)
+        mid = self.mids.get(s)
+        if not mid:
+            return None, 0.0
+        age, pos = now - p.t0, int(portfolio.positions.get(s, 0))
+        sell_in_flight = (f := self._inflight.get(s)) and f[0] == "sell" and f[1]
+
+        if p.mode == "ride":
+            if p.state == "enter":
+                p.target = p.target or self._size(s, ask or mid, nw, pos)
+                limit = p.pre * (1 + self.ENTRY_SLIPPAGE * p.pct)
+                if killed or p.held >= p.target or age > p.ramp_s * 0.5 or (ask and ask > limit):
+                    p.state = "hold" if p.held else "done"
+                    return None, 0.0
+                qty = min(p.target - p.held, _depth(market, s, "asks", limit))
+                return (self._sig(s, "buy", qty, limit), 3.0) if ask and qty > 0 else (None, 0.0)
+            take = p.pre * (1 + self.RIDE_TAKE * p.overshoot * p.pct)
+            stop = p.entry_px * (1 - abs(p.pct) / 2)
+            if p.held <= 0:
+                p.state = "done"
+            elif bid and (mid >= take or mid <= stop or age > p.ramp_s * self.RIDE_TIME_STOP):
+                return self._sig(s, "sell", min(p.held, pos), bid * 0.995), 5.0
+            return None, 0.0
+
+        # FADE
+        if p.core0 < 0:
+            p.core0 = max(0, pos)
+        if p.state == "derisk":                    # sell the core before the ramp takes it down
+            left = p.core0 - p.core_sold - (sell_in_flight or 0)
+            floor_px = p.pre * (1 + 0.5 * p.pct)   # never below half the announced move
+            qty = min(left, _depth(market, s, "bids", floor_px)) if bid else 0
+            if qty > 0 and age < p.ramp_s * 0.5:
+                return self._sig(s, "sell", qty, floor_px), 4.0
+            if left <= 0 or age >= p.ramp_s * 0.5:
+                p.state = "wait"
+            return None, 0.0
+        owed = p.core_sold - p.core_back
+        if p.state == "wait":                      # wait for the overshoot trough
+            if age >= p.ramp_s or mid <= p.pre * (1 + p.overshoot * p.pct) * 1.002:
+                p.state = "enter"
+                p.target = 0 if killed or not p.extra_ok else self._size(s, ask or mid, nw, pos)
+            return None, 0.0
+        if p.state == "enter":                     # buy the core back, and the extra
+            limit = p.pre * (1 + p.pct)            # never above the announced settle level
+            want = owed + p.target - p.held
+            if want <= 0 or age > p.ramp_s * 2:
+                p.state = "hold" if p.held else "restore"
+                return None, 0.0
+            qty = min(want, _depth(market, s, "asks", limit))
+            if not ask or ask > limit or qty <= 0:
+                return None, 0.0
+            return self._sig(s, "buy", qty, limit), 2.0 + (p.pre - ask) / p.pre
+        if p.state == "hold":                      # sell the extra on the rebound
+            if p.held <= 0:
+                p.state = "restore"
+            elif bid and (mid >= p.pre or mid <= p.entry_px * (1 - self.FADE_STOP)
+                          or age > p.ramp_s * self.FADE_TIME_STOP):
+                return self._sig(s, "sell", min(p.held, pos), bid * 0.995), 5.0
+            return None, 0.0
+        if owed <= 0:                              # restore: put the core back, whatever the price
+            p.state = "done"
+            return None, 0.0
+        qty = min(owed, _depth(market, s, "asks", ask * 1.003)) if ask else 0
+        return (self._sig(s, "buy", qty, ask * 1.003), 1.0) if qty > 0 else (None, 0.0)
+
+    def _size(self, s: str, px: float, nw: float, pos: int) -> int:
+        """Shares to buy: the risk budget, capped by the seat, the team and MAX_SHARES."""
+        others = self.team_board.get(s, 0) - self.my_board.get(s, 0)
+        by_risk = int(self.RISK_FRACTION * nw / px) if px > 0 else 0
+        return max(0, min(by_risk, self.MAX_SHARES, SEAT_CAP - max(pos, 0),
+                          TEAM_LIMIT - TEAM_BUFFER - others - max(pos, 0)))
 
     @staticmethod
-    def _row_state(row: dict) -> dict:
-        """The exchange's books from a leaderboard row (the dashboard's numbers)."""
-        return {"cash": float(row.get("cash", 0.0)),
-                "positions": dict(row.get("positions") or {}),
-                "realized_pnl": float(row.get("realized_pnl", 0.0)),
-                "avg_cost": dict(row.get("avg_cost") or {}),
-                "fees": float(row.get("total_fees_paid", 0.0))
-                        - float(row.get("total_rebates_earned", 0.0))}
+    def _sig(s: str, side: str, qty: int, px: float) -> Signal | None:
+        return Signal(symbol=s, side=side, quantity=qty, price=round(px, 2)) if qty > 0 else None
 
-    @staticmethod
-    def _update_state(msg: PortfolioUpdate) -> dict:
-        """The exchange's books from a PortfolioUpdate (no entry prices in it)."""
-        return {"cash": msg.cash, "positions": dict(msg.positions),
-                "realized_pnl": msg.realized_pnl,
-                "fees": msg.total_fees_paid - msg.total_rebates_earned}
+    def on_fill(self, side: str, symbol: str, quantity: int, price: float) -> None:
+        """Each plan keeps its own share count, so the core is never sold twice."""
+        if p := self.plans.get(symbol):
+            if side == "buy":
+                back = min(quantity, p.core_sold - p.core_back)      # restore the core first
+                p.core_back += back
+                if extra := quantity - back:
+                    p.entry_px = (p.entry_px * p.held + price * extra) / (p.held + extra)
+                    p.held += extra
+            elif p.state in ("derisk", "wait"):
+                p.core_sold += quantity
+            else:
+                p.held = max(0, p.held - quantity)
+        super().on_fill(side, symbol, quantity, price)
 
-    def _sync(self, source: str, state: dict) -> None:
-        """Adopt the exchange's books after a (re)connect and log what differed."""
-        self._resync = False
-        diffs = self.ledger.sync_from(marks=self._owner._refs, **state)
-        if diffs:
-            logging.info("RESYNC from %s — adopted %d difference(s):\n%s", source, len(diffs),
-                         "\n".join(f"    {d}" for d in diffs))
-        else:
-            logging.info("RESYNC from %s — books already agree", source)
-        self._log_books()
+    def on_ipo(self, symbol: str, lo: float, hi: float, shares: int, data: dict):
+        """Bid the top of the range for what the seat can hold and pay for."""
+        cash = self._portfolio.cash if self._portfolio else 0.0
+        qty = min(SEAT_CAP, int(0.95 * cash / hi)) if hi else 0
+        return (qty, hi) if qty > 0 else None
 
-    def _reconcile_close(self, source: str, state: dict) -> None:
-        """Compare our books with the exchange's after the close. A mismatch is a bug."""
-        self._closing = False
-        diffs = self.ledger.reconcile(**state)
-        if diffs:
-            logging.warning("RECONCILE at close vs %s — %d MISMATCH(ES):\n%s", source, len(diffs),
-                            "\n".join(f"    {d}" for d in diffs))
-        else:
-            logging.info("RECONCILE at close vs %s — OK: positions, entries, cash, fees and "
-                         "realized P&L match the exchange (non-trade cash flows %+.2f)",
-                         source, self.ledger.accruals)
-        self.ledger.save(self._state_path)
 
-    def _check(self) -> str:
-        """Our books vs the latest leaderboard row, for the BOOKS header."""
-        if self._resync:
-            return "waiting for the first exchange snapshot"
-        if self._last_row is None:
-            return "no leaderboard row yet"
-        nw = f"net_worth {self._last_row.get('net_worth', 0.0):,.2f}"
-        if self._owner._inflight:
-            return f"{nw} · check skipped (order in flight)"
-        diffs = self.ledger.reconcile(**self._row_state(self._last_row))
-        return f"{nw} · " + ("matches exchange" if not diffs else "MISMATCH: " + "; ".join(diffs))
+def _depth(market, s: str, side: str, limit: float) -> int:
+    """Shares displayed on one side of the book no worse than limit (ORDER_MAX if unknown)."""
+    book = getattr(market, "_books", {}).get(s)
+    if not book:
+        return ORDER_MAX
+    ok = (lambda p: p <= limit) if side == "asks" else (lambda p: p >= limit)
+    return int(sum(q for p, q in book.get(side, []) if ok(p)))
 
-    def _log_books(self, title: str = "BOOKS") -> None:
-        """The books as an aligned table, headed by the exchange check."""
-        logging.info("%s · %s\n%s", title, self._check(), self.ledger.table(self._owner._refs))
 
-    async def _housekeeping(self) -> None:
-        """Every second: periodic books line, state save, optional induced drop."""
-        last = time.monotonic()
-        while True:
-            await asyncio.sleep(1.0)
-            now = time.monotonic()
-            if now - last >= STATUS_EVERY_S:
-                last = now
-                if self._resync:
-                    logging.info("BOOKS · %s", self._check())
-                else:
-                    self.ledger.seed_missing_entries(self._owner._refs)
-                    self._log_books()
-                    self.ledger.save(self._state_path)
-            if DROP_AFTER_S and not self._dropped and now - self._t0 >= DROP_AFTER_S:
-                self._dropped = True
-                logging.warning("INDUCED DROP after %.0fs — closing the socket", DROP_AFTER_S)
-                await self._ws.close()
+STRATEGIES = {"momentum": MomentumTrader, "event": EventTrader}
+MyTrader = STRATEGIES[os.environ.get("STRATEGY", "momentum")]
 
-    # ── Orders and session events ─────────────────────────────────────────
-
-    async def _place_order(self, signal: Signal) -> None:
-        """Send the order as IOC (the stock plumbing sends a resting limit order)."""
-        if self.auction:
-            return              # auctions accept limit orders only; an IOC would be rejected
-        self._owner.on_sent(signal)
-        logging.info("Order sent: %s %d %s @ %.2f (IOC)",
-                     signal.side, signal.quantity, signal.symbol, signal.price)
-        await self._send(PlaceOrder(
-            team_id=_config.TEAM_ID, symbol=signal.symbol, side=signal.side,
-            order_type="ioc", price=signal.price, quantity=signal.quantity,
-        ))
-
-    async def _on_session_event(self, msg) -> None:
-        """Auction gate, IPO/dividend bookkeeping, close-of-session reconcile."""
-        d = msg.data or {}
-        if msg.event in AUCTION_EVENTS:
-            self.auction = True
-        elif msg.event in ("SESSION_OPEN", "SESSION_CLOSED"):
-            self.auction = False
-        if msg.event == "IPO_OPEN" and d.get("symbol"):
-            self._ipo_pending.add(d["symbol"])
-        elif msg.event == "IPO_LISTED":
-            self._ipo_pending.discard(d.get("symbol", ""))
-        elif msg.event == "DIVIDEND" and d.get("symbol"):
-            self.ledger.apply_dividend(d["symbol"], float(d.get("amount_per_share", 0)))
-        elif msg.event == "SESSION_CLOSED":
-            # Reconcile on the next exchange snapshot after the close (the books are final by then)
-            self._closing = True
-            self._log_books("BOOKS at close")
-            logging.info("SESSION SUMMARY connects=%d rejects=%d", self._connects, self.rejects)
-        await super()._on_session_event(msg)
-
-    async def flatten_all_positions(self) -> None:
-        """Disabled. The stock version sends market orders after the close, and an
-        order after the close is always rejected (the 10 rejects per seat in the
-        week-2 recording were exactly this)."""
-
+# The live plumbing, re-exported for the tests that import it from here
+from team.live import WIRE, _Bot  # noqa: E402,F401
 
 if __name__ == "__main__":
     MyTrader().run()

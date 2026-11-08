@@ -1,0 +1,27 @@
+# Part A evidence — session_week05_20261029_221018_market.jsonl
+scenario: week 5 · Risk — breakers, stops and liquidation live · position_limit 800 · seat cap 150 · 6_rings_trader_2 live log 6_rings_trader_2_20261029_163731.log
+
+## Halts on the venue and what our seats did
+t+   299s RESUMED AAPL  (we trade it) · our fills during the halt: 0 · first order after: +2 s · first fill after: +921.4 s
+t+   299s RESUMED NVDA  (we trade it) · our fills during the halt: 0 · first order after: +3 s · first fill after: +921.4 s
+t+   363s HALT    NFLX  NFLX: NFLX velocity halt: 5.3% move in 60s (threshold 5.0%)
+t+   664s RESUMED NFLX  (we trade it) · our fills during the halt: 0 · first order after: +0 s · first fill after: +0.1 s
+t+   883s HALT    AMD   AMD: AMD velocity halt: 5.1% move in 60s (threshold 5.0%)
+t+  1183s RESUMED AMD   (we trade it) · our fills during the halt: 0 · first order after: +0 s · first fill after: —
+t+  1217s HALT    AMD   AMD: AMD velocity halt: 5.2% move in 60s (threshold 5.0%)
+t+  1267s HALT    NFLX  NFLX: NFLX velocity halt: 5.0% move in 60s (threshold 5.0%)
+t+  1300s HALT    AAPL  AAPL: AAPL velocity halt: 5.9% move in 60s (threshold 5.0%)
+t+  1517s RESUMED AMD   (we trade it) · our fills during the halt: 0 · first order after: +3 s · first fill after: —
+t+  1567s RESUMED NFLX  (we trade it) · our fills during the halt: 0 · first order after: +0 s · first fill after: +0.1 s
+t+  1600s RESUMED AAPL  (we trade it) · our fills during the halt: 0 · first order after: +3 s · first fill after: —
+t+  1677s HALT    AMD   AMD: AMD velocity halt: 5.7% move in 60s (threshold 5.0%)
+t+  1977s RESUMED AMD   (we trade it) · our fills during the halt: 0 · first order after: +3 s · first fill after: —
+
+## Largest |position| of 6_rings_trader_2 per symbol during the block (live log, exchange-reconciled)
+  AAPL 54  AMD 24  AMZN 24  GOOGL 24  INTC 44  META 137  MSFT 74  NFLX 90  NVDA 126  ORCA 140  TSLA 37
+  max 140 · seat cap 150 · scenario limit 800 → within
+  team net share flow in the block (all 6_rings_ seats, tape): AAPL +6  AMD -2  AMZN +0  GOOGL +0  INTC +0  META +0  MSFT +0  NFLX -117  NVDA -1  ORCA -4  TSLA +0
+
+## Liquidation
+  LIQUIDATION events on the tape: 0 · LIQUIDATED lines in our log: 0
+  our fills on the tape: {'6_rings_trader_3': 38, '6_rings_trader_1': 54, '6_rings_trader_2': 97, '6_rings_trader_4': 91}

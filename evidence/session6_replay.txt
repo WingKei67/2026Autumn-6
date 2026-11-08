@@ -1,0 +1,25 @@
+# Part A evidence — session_week06_20261106_214023_market.jsonl
+scenario: week 6 · Scenario tournament — the whole market at once · position_limit 1000 · seat cap 150 · 6_rings_trader_2 live log 6_rings_trader_2_20261106_151921.log
+
+## Halts on the venue and what our seats did
+t+    17s HALT    TSLA  TSLA: TSLA velocity halt: 5.1% move in 60s (threshold 5.0%)
+t+   300s RESUMED NFLX  (not one of ours) · our fills during the halt: 0 · first order after: +3 s · first fill after: —
+t+   300s RESUMED AMD   (we trade it) · our fills during the halt: 0 · first order after: +3 s · first fill after: —
+t+   304s HALT    INTC  INTC: INTC velocity halt: 5.1% move in 60s (threshold 5.0%)
+t+   317s RESUMED TSLA  (we trade it) · our fills during the halt: 0 · first order after: +2 s · first fill after: —
+t+   357s HALT    TSLA  TSLA: TSLA velocity halt: 5.1% move in 60s (threshold 5.0%)
+t+   605s RESUMED INTC  (we trade it) · our fills during the halt: 0 · first order after: +3 s · first fill after: +7.9 s
+t+   657s RESUMED TSLA  (we trade it) · our fills during the halt: 0 · first order after: +3 s · first fill after: —
+t+  1258s HALT    VLTA  VLTA: VLTA velocity halt: 5.0% move in 60s (threshold 5.0%)
+t+  1266s HALT    NFLX  NFLX: NFLX velocity halt: 5.1% move in 60s (threshold 5.0%)
+t+  1558s RESUMED VLTA  (we trade it) · our fills during the halt: 0 · first order after: +2 s · first fill after: —
+t+  1566s RESUMED NFLX  (not one of ours) · our fills during the halt: 0 · first order after: +3 s · first fill after: —
+
+## Largest |position| of 6_rings_trader_2 per symbol during the block (live log, exchange-reconciled)
+  AAPL 32  AMD 32  AMZN 32  GOOGL 32  INTC 54  META 32  MSFT 37  NVDA 134  ORCA 123  TSLA 32  VLTA 64
+  max 134 · seat cap 150 · scenario limit 1000 → within
+  team net share flow in the block (all 6_rings_ seats, tape): AAPL -23  AMD +32  AMZN +132  GOOGL +101  INTC +30  META -14  MSFT +153  NFLX +55  NVDA +142  ORCA +32  TSLA +5  VLTA +150
+
+## Liquidation
+  LIQUIDATION events on the tape: 0 · LIQUIDATED lines in our log: 0
+  our fills on the tape: {'6_rings_broker': 953, '6_rings_trader_3': 24, '6_rings_trader_4': 26, '6_rings_trader_1': 6, '6_rings_trader_2': 18}
