@@ -29,12 +29,12 @@
 
 \* < 10 round trips per seed, so excluded. Every cell loses even before fees. The rule picks **(60, 1 %)**.
 
-**Test.** Hit rate = share of round trips profitable after fees.
+**Test.** ± = standard error of the mean (s.d. / √n). Hit rate = share of round trips profitable after fees.
 
 | Set | n | Mean P&L | s.d. | Before fees | Hit rate | Fees | Worst DD |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | SimSession seeds 10–29 | 20 | **−137** ± 21 | 93 | −18 | 5 % | 118 | 365 |
-| Recorded wk 3 / 4 / 5 / 6 (excess) | 4 | −2,829 / −1,969 / −5,048 / −1,280 | — | −1,937 / −201 / −2,628 / −350 | 10–30 % | 930–2,419 | 5,431 |
+| Recorded wk 3 / 4 / 5 / 6 (excess) | 4 | −2,829 / −1,969 / −5,048 / −1,280 | — | −1,937 / −201 / −2,628 / −350 | 10–30 % | 892–2,419 | 5,431 |
 
 **Rejected.** In SimSession no drift follows a 1 % rise. In the real sessions the strategy loses *before* fees every week: prices **mean-revert** after sharp rises. (For comparison, `EventTrader` made +627 / +1,554 / −1,629 / −1,495 on the same tapes.)
 
@@ -51,17 +51,17 @@ SimSession is flat: there is no information to lose. In the real sessions the lo
 
 ## 5. Live vs backtest
 
-`MomentumTrader` first trades live in Session 7. Sessions 5–6 ran `EventTrader` (replaying them reproduces its original backtest to within $17). Below, its live fills against a replay of the same tape:
+**Why momentum has no live run yet:** it was built after Sessions 5–6 were played, and no live block falls before the deadline (its first is Session 7). So we compare `EventTrader`, which traded Sessions 5–6 live; its replay matches its original backtest to within $17. The gaps come from the replay's fill model and the IOC orders in `RiskTrader`, which both strategies share, so they apply to momentum too:
 
 | Event | Fills live / bt | P&L live / bt | Why they differ |
 |---|---:|---:|---|
 | Wk 5 NFLX +7.6 % | 2 / 2 | +56 / +189 | A halt froze both runs |
-| Wk 5 market −3.0 % | 90 / 51 | **+865 / −1,818** | **Inventory:** live held shares from earlier blocks to sell. **Reopening:** the replay sold into a thin post-halt book (701 vs 812 live) |
-| Wk 6 MSFT +3.1 % | 1 / 2 | −42 / −399 | **Latency:** the replay bought a stale ask; live, the price had already moved |
-| Wk 6 market −2.2 % | 10 / 52 | −144 / −1,097 | **Fill model:** rivals took the depth; live IOCs went unfilled |
-| **All 6 events** | 110 / 109 | **+739 / −3,124** | Live also had 30 `INSUFFICIENT_CASH` rejects |
+| Wk 5 market −3.0 % | 90 / 51 | **+865 / −1,818** | **Inventory** from earlier blocks; **reopening**: replay sold the thin post-halt book (701 vs 812) |
+| Wk 6 MSFT +3.1 % | 1 / 2 | −42 / −399 | **Latency**: replay bought a stale ask |
+| Wk 6 market −2.2 % | 10 / 52 | −144 / −1,097 | **Depth**: rivals took it; live IOCs unfilled |
+| **All 6 events** | 110 / 109 | **+739 / −3,124** | + 30 live `INSUFFICIENT_CASH` rejects |
 
-**Lesson:** the replay assumes first place in the queue, all the displayed depth, and no inventory. For momentum, which needs fast fills into a rising book, this flatters the backtest, so live should do no better than §3.
+**Lesson:** the replay assumes first place in the queue, all the displayed depth, and no inventory. Inventory matters only for `EventTrader` (momentum sells only what it bought); latency, depth and unfilled IOCs all flatter a momentum backtest, which needs fast fills into a rising book. That backtest already loses, so live momentum should lose at least as much as §3.
 
 ## 6. Session 5 (Part A): replay evidence
 

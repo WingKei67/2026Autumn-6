@@ -106,7 +106,7 @@ def main() -> int:
                     ha="right", va="center", fontsize=8, color=INK)
         a2.annotate(f"{d[ks[-1]]:+,.0f}", (len(ks) - 1, d[ks[-1]]), xytext=(8, 0), textcoords="offset points",
                     ha="left", va="center", fontsize=8, color=INK)
-    a2.set_xticks(range(4), ["0 (live)", "+1", "+2", "+5"])
+    a2.set_xticks(range(4), ["0 (no delay)", "+1", "+2", "+5"])
     a2.set_xlim(-0.6, 3.6)
     a2.set_xlabel("feature read k ticks late", color=INK2, fontsize=9)
     a2.set_ylabel("mean P&L before fees, $", color=INK2, fontsize=9)
